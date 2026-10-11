@@ -25,24 +25,39 @@ const pick = (files, name, ep) => {
 
 // data.tsv lines are "normkey \t name \t hash \t bytes [\t url]", pre-sorted by build.js. '\t' sorts below
 // every key char, so line order equals key order and title lookup is a binary-searched prefix scan.
-let db = [], urls = new Map();
+// The file stays one Buffer with line offsets (a quarter of the memory of 1.4M strings); lines decode on demand.
+let db = { buf: Buffer.alloc(0), offs: new Uint32Array([0]) }, urls = new Map();
 const kind = h => h.length === 40 ? 'torrents' : 'webdl';
+const count = () => db.offs.length - 1;
+const line = ({ buf, offs }, i) => buf.toString('utf8', offs[i], offs[i + 1] - 1);
 function load() {
-  const lines = fs.readFileSync(DATA, 'utf8').split('\n');
+  const buf = fs.readFileSync(DATA);
+  const starts = [0];
+  for (let pos = buf.indexOf(10); pos !== -1; pos = buf.indexOf(10, pos + 1)) starts.push(pos + 1);
+  starts.push(buf.length + 1);
+  const next = { buf, offs: Uint32Array.from(starts) };
   const u = new Map();
-  for (const l of lines) if (l.includes('\thttp')) { const [, , h, , url] = l.split('\t'); if (url) u.set(h, url); }
-  db = lines;
+  for (let pos = buf.indexOf('\thttp'); pos !== -1; pos = buf.indexOf('\thttp', pos + 1)) {
+    const { offs } = next;
+    let lo = 0, hi = offs.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (offs[m] <= pos) lo = m; else hi = m - 1; }
+    const [, , h, , url] = line(next, lo).split('\t');
+    if (url) u.set(h, url);
+  }
+  db = next;
   urls = u;
-  console.log('loaded', db.length, 'entries,', urls.size, 'webdl');
+  console.log('loaded', count(), 'entries,', urls.size, 'webdl');
 }
 function prefix(p) {
-  const rows = db;
-  let lo = 0, hi = rows.length;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (rows[m] < p) lo = m + 1; else hi = m; }
+  const d = db, n = d.offs.length - 1;
+  let lo = 0, hi = n;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (line(d, m) < p) lo = m + 1; else hi = m; }
   const out = [];
-  for (let i = lo; i < rows.length && rows[i].startsWith(p); i++) {
-    const [k, n, h, b] = rows[i].split('\t');
-    out.push({ k, n, h, b: +b });
+  for (let i = lo; i < n; i++) {
+    const l = line(d, i);
+    if (!l.startsWith(p)) break;
+    const [k, nm, h, b] = l.split('\t');
+    out.push({ k, n: nm, h, b: +b });
   }
   return out;
 }
@@ -264,7 +279,7 @@ const server = http.createServer(async (req, res) => {
     if (p[0] === 'logo.png') return send(res, 200, LOGO, 'image/png');
     const withLogo = { ...manifest, logo: base + '/logo.png' };
     if (p[0] === 'manifest.json') return send(res, 200, withLogo);
-    if (p[0] === 'health') return send(res, db.length ? 200 : 503, { entries: db.length, webdl: urls.size, refreshing: busy });
+    if (p[0] === 'health') return send(res, count() ? 200 : 503, { entries: count(), webdl: urls.size, refreshing: busy });
     if (p[0] === 'api' && p[1] === 'validate') {
       const key = url.searchParams.get('key') || '';
       if (!/^[\w-]+$/.test(key)) return send(res, 200, { valid: false, detail: 'Malformed key' });
@@ -300,4 +315,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config, limiter };
+module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h) };

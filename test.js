@@ -1,5 +1,23 @@
 const assert = require('assert');
-const { norm, epRe, pick, config, limiter } = require('./server');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+process.env.DATA_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-')), 'data.tsv');
+const { norm, epRe, pick, config, limiter, load, prefix, webUrl } = require('./server');
+
+const h = c => c.repeat(40), w = c => c.repeat(32);
+fs.writeFileSync(process.env.DATA_FILE, [
+  `amelie 2001\tAmélie (2001) 1080p\t${h('a')}\t100`,
+  `amelie 2001 4k\tAmélie.2001.4K\t${w('b')}\t200\thttps://x.test/a?b=1`,
+  `amelie the musical\tAmélie The Musical\t${h('c')}\t300`,
+  `zebra\tZebra\t${h('d')}\t400`,
+].join('\n'));
+load();
+assert.deepEqual(prefix('amelie 2001').map(r => r.n), ['Amélie (2001) 1080p', 'Amélie.2001.4K']);
+assert.deepEqual(prefix('zebra ').map(r => r.n), []);
+assert.equal(prefix('zebra')[0].b, 400);
+assert.equal(webUrl(w('b')), 'https://x.test/a?b=1');
+assert.equal(webUrl(h('a')), undefined);
 
 assert.equal(norm('[QxR] Schindler’s List (1993) 1080p'), 'schindlers list 1993 1080p');
 assert.equal(norm('Amélie.2001.BluRay'), 'amelie 2001 bluray');
