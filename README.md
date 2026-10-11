@@ -33,11 +33,11 @@ server, nothing is collected.
 ## Setup
 
 1. Push this repo to GitHub as `hashbolt`.
-2. Add the `REDIS_URL` repository secret (optional; without it only the git hashlists are indexed).
+2. Add the `REDIS_URL` repository secret: `gh secret set REDIS_URL` (optional; without it only the git hashlists are indexed).
 3. Run the **Build index** workflow once (Actions → Build index → Run workflow); after that it runs every 30 minutes.
-4. Deploy the server with `INDEX_REPO=<owner>/hashbolt`, `REDIS_URL` (for contributions) and `GITHUB_TOKEN` if the repo is private.
+4. Deploy the server with `INDEX_REPO=<owner>/hashbolt` and `REDIS_URL` (for contributions).
 
-> If the repo is public, the release (including the Redis entries) is public too.
+> The repo and its `index` release are public, including the Redis entries. Secrets (`REDIS_URL`) live only in GitHub Actions secrets.
 
 ## Run the server
 
