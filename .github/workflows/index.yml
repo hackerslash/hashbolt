@@ -40,8 +40,9 @@ jobs:
           key: decoded-${{ steps.lists.outputs.sha }}
           restore-keys: decoded-
 
+      # Private runners default to a ~2 GB heap; the build peaks near 3 GB
       - name: Build
-        run: node build.js
+        run: node --max-old-space-size=4096 build.js
         env:
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
