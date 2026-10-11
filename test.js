@@ -30,6 +30,9 @@ const files = [{ name: 'S01E01.mkv', size: 5 }, { name: 'S01E02.mkv', size: 4 },
 assert.equal(pick(files, 'pack', ep).name, 'S01E02.mkv');
 assert.equal(pick(files, 'movie').name, 'S01E01.mkv');
 assert.equal(pick([{ name: 'x.mkv', size: 1 }], 'Show.S01E02', ep).name, 'x.mkv');
+const pack = [{ name: 'Matrix.1999.2003/The.Matrix.1999.mkv', size: 5 }, { name: 'Matrix.1999.2003/The.Matrix.Reloaded.2003.mkv', size: 9 }];
+assert.equal(pick(pack, 'The.Matrix.Quadrilogy', undefined, 1999).name, 'Matrix.1999.2003/The.Matrix.1999.mkv');
+assert.equal(pick(pack, 'The.Matrix.Quadrilogy').name, 'Matrix.1999.2003/The.Matrix.Reloaded.2003.mkv');
 const seg = Buffer.from(JSON.stringify({ key: 'ab-12', contribute: true })).toString('base64url');
 assert.deepEqual(config(seg), { key: 'ab-12', contribute: true });
 assert.deepEqual(config('8976-5a24-4230'), { key: '8976-5a24-4230' });

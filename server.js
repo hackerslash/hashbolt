@@ -18,9 +18,13 @@ const norm = s => s.replace(/^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/, '').normalize('
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
 const epRe = (s, e) => new RegExp(`(s0*${+s}[ ._-]*e0*${+e}|\\b0*${+s}x0*${+e})(?!\\d)`, 'i');
 const biggest = a => a.sort((x, y) => y.size - x.size)[0];
-const pick = (files, name, ep) => {
+// Episode: the file matching SxxEyy (or the only video of a single-episode torrent). Movie: the biggest video,
+// preferring files with the release year so a multi-movie pack yields the right film.
+const pick = (files, name, ep, year) => {
   const v = files.filter(f => VIDEO.test(f.name));
-  return ep ? biggest(v.filter(f => ep.test(f.name))) || (ep.test(name) ? biggest(v) : undefined) : biggest(v);
+  if (ep) return biggest(v.filter(f => ep.test(f.name))) || (ep.test(name) ? biggest(v) : undefined);
+  const dated = year ? v.filter(f => path.basename(f.name).includes(year)) : [];
+  return biggest(dated.length ? dated : v);
 };
 
 // data.tsv lines are "normkey \t name \t hash \t bytes [\t url]", pre-sorted by build.js. '\t' sorts below
@@ -141,9 +145,9 @@ async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
   if (!m?.name) return [];
   const title = norm(m.name);
-  let cands = prefix(title + ' ');
+  let cands = prefix(title + ' '), y;
   if (type === 'movie') {
-    const y = +String(m.year || m.releaseInfo || '').slice(0, 4);
+    y = +String(m.year || m.releaseInfo || '').slice(0, 4);
     if (y) cands = cands.filter(r => { const yr = r.k.slice(title.length).match(/\b(19|20)\d\d\b/); return yr && Math.abs(yr[0] - y) <= 1; });
   } else {
     cands = cands.filter(r => { const x = r.k.match(/\bs(\d+) ?e(\d+)\b/); return !x || (+x[1] === +s && +x[2] === +e); });
@@ -156,9 +160,9 @@ async function find(key, type, imdb, s, e) {
   const ep = s && epRe(s, e);
   const out = [];
   for (const r of cands) {
-    const f = c[r.h] && pick(c[r.h], r.n, ep);
-    if (f) out.push({ ...r, file: path.basename(f.name), size: f.size,
-      res: ((r.n + ' ' + f.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase() });
+    const f = c[r.h] && pick(c[r.h], r.n, ep, y);
+    const res = ((r.n + ' ' + f?.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
+    if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: res === '4K' ? '2160P' : res });
   }
   return out.sort((a, b) => b.size - a.size);
 }
@@ -229,16 +233,17 @@ async function streams(key, seg, type, id, base) {
   return (await find(key, type, imdb, ep ? s : '', ep ? e : '')).map(r => ({
     name: (r.h.length === 40 ? 'Hashbolt ⚡\n' : 'Hashbolt 🌐⚡\n') + r.res,
     description: `${r.n}${ep ? '\n' + r.file : ''}\n💾 ${(r.size / 1e9).toFixed(2)} GB`,
-    url: `${base}/${seg}/play/${r.h}${ep ? `/${s}/${e}` : ''}`,
+    url: `${base}/${seg}/play/${r.h}/${encodeURIComponent(r.file)}`,
     behaviorHints: { bingeGroup: 'hashbolt-' + r.res, filename: r.file, videoSize: r.size },
   }));
 }
 
 // Players often request a stream URL twice at once; share one resolve and reuse the link for 5 min.
 const links = new Map();
-const link = (key, hash, s, e) => memo(links, `${key}:${hash}:${s}:${e}`, 5 * 60e3, () => play(key, hash, s, e));
+const link = (key, hash, file) => memo(links, `${key}:${hash}:${file}`, 5 * 60e3, () => play(key, hash, file));
 
-async function play(key, hash, s, e) {
+// `file` is the basename chosen when the stream was listed, so playback opens exactly what was shown.
+async function play(key, hash, file) {
   const k = kind(hash), web = k === 'webdl';
   let t = await mylist(key, k, { match: x => String(x.hash).toLowerCase() === hash });
   if (!t) {
@@ -251,7 +256,7 @@ async function play(key, hash, s, e) {
     const d = await tb(key, web ? '/webdl/createwebdownload' : '/torrents/createtorrent', { method: 'POST', body: fd });
     t = await tb(key, `/${k}/mylist?bypass_cache=true&id=${d.torrent_id ?? d.webdownload_id}`);
   }
-  const f = pick(t.files || [], t.name, s && epRe(s, e));
+  const f = (t.files || []).find(x => path.basename(x.name) === file) || pick(t.files || [], t.name);
   if (!f) throw new Error('no matching video file');
   return tb(key, `/${k}/requestdl?token=${key}&${web ? 'web_id' : 'torrent_id'}=${t.id}&file_id=${f.id}`);
 }
@@ -296,8 +301,8 @@ const server = http.createServer(async (req, res) => {
       const list = await streams(key, seg, rest[0], rest[1].replace(/\.json$/, ''), base).catch(e => (console.error(e.message), []));
       return send(res, 200, { streams: list });
     }
-    if (route === 'play' && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0]) && rest.slice(1).every(x => /^\d+$/.test(x))) {
-      res.writeHead(302, { Location: await link(key, rest[0].toLowerCase(), rest[1], rest[2]) });
+    if (route === 'play' && rest.length === 2 && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0])) {
+      res.writeHead(302, { Location: await link(key, rest[0].toLowerCase(), rest[1]) });
       return res.end();
     }
     send(res, 404, { error: 'not found' });
