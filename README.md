@@ -1,73 +1,65 @@
 # Hashbolt ⚡
 
-Stremio addon that serves **only TorBox-cached streams** for movies and series, from the
-[DMM hashlists](https://github.com/debridmediamanager/hashlists) plus an optional Redis `hashlib`.
+Stremio addon that lists only TorBox-cached streams for movies and series, from the
+[DMM hashlists](https://github.com/debridmediamanager/hashlists) and the Redis `hashlib` shared with MyTorbox.
 
-- Torrents (⚡) and web downloads (🌐⚡), checked against the TorBox cache before listing
-- Season packs: the right episode file is picked automatically
+- Cached torrents (⚡) and web downloads (🌐⚡); season packs resolve to the requested episode
 - Each user installs with their own TorBox key from `/configure`; keys are never stored server-side
-- Users must agree to share their library (hashes, names, sizes, file names, web download links) to grow the index
+- Installing requires agreeing to share your library into the index (see [Data sharing](#data-sharing))
 
-## How the index updates
+## How it works
 
 ```
-GitHub Actions (every 30 min)                     Hashbolt server (every 10 min)
-  clone hashlists + scan Redis                      GET release "index" (1 API call)
-  build.js -> sorted data.tsv                       asset changed? download + gunzip
-  publish data.tsv.gz to release "index"  ───────>  swap file, reload in memory
+GitHub Actions, every 30 min                     Hashbolt server, every 10 min
+  blobless clone of hashlists + scan Redis         check release "index" (1 API call)
+  build.js -> sorted data.tsv                      changed? download, gunzip, reload
+  upload data.tsv.gz to release "index"  ───────>
 ```
 
-`build.js` caches each decoded list by its git blob sha (`actions/cache`), so a run only decompresses
-lists that changed. The server needs no git; its only dependency is `ioredis`, for data sharing.
+- **Build:** each list's decoded contents are cached by git blob sha (`actions/cache`), so a run only fetches and
+  decompresses lists that changed.
+- **Lookup:** IMDb id -> Cinemeta title -> binary search over the sorted index (kept as one buffer, ~500 MB RSS)
+  -> TorBox cache check. Check results are cached per hash for 10 min and shared across users and episodes.
+- **Play:** `/play` reuses the item if it's already in the user's library, otherwise adds it only if cached, then
+  redirects to the TorBox link (reused for 5 min).
 
 ## Data sharing
 
-Sharing is a condition of use: the configure page only hands out an install link after the user accepts a consent
-that spells out everything below. Consent is encoded in the install URL (`base64url({"key", "contribute": true})`);
-installs with a bare key never contribute.
+The configure page only issues an install link after the user accepts a consent that lists exactly what is shared.
+Consent is encoded in the install URL (`base64url({"key", "contribute": true})`); bare-key installs never contribute.
 
-For opted-in users, a stream request reads their TorBox torrents and web downloads (paginated like MyTorbox,
-1000 per page), at most once every 6 hours, throttled in memory by a SHA-256 of the key. Each finished item is written
-to the Redis `hashlib` that MyTorbox also feeds, in the same shape: lowercase hash ->
-`{name, size, files, url}` (`url` = the web download's original link, web downloads only). Entries are deduplicated
-by hash, and ones already identical in Redis are not rewritten. No key, email, `auth_id` or IP is stored. Without
-`REDIS_URL` on the server, nothing is collected.
+For consenting users, a stream request triggers a background copy of their TorBox torrents and web downloads, at
+most once per 6 hours (Redis `SET NX EX` claim, shared across restarts and instances) and at most 3 copies at once.
+Each finished item is written to `hashlib` in MyTorbox's shape, `lowercase hash -> {name, size, files, url}` (`url`
+only for web downloads), deduplicated by hash and skipped when already identical. No key, email, `auth_id` or IP
+is stored. Without `REDIS_URL` on the server, nothing is collected.
 
 ## Setup
 
-1. Push this repo to GitHub as `hashbolt`.
-2. Add the `REDIS_URL` repository secret: `gh secret set REDIS_URL` (optional; without it only the git hashlists are indexed).
-3. Run the **Build index** workflow once (Actions → Build index → Run workflow); after that it runs every 30 minutes.
-4. Deploy the server with `INDEX_REPO=<owner>/hashbolt` and `REDIS_URL` (for contributions).
-
-> The repo and its `index` release are public, including the Redis entries. Secrets (`REDIS_URL`) live only in GitHub Actions secrets.
-
-## Run the server
+1. Add the `REDIS_URL` Actions secret: `gh secret set REDIS_URL`.
+2. Run **Build index** once (Actions → Build index → Run workflow); it then runs every 30 minutes.
+3. Deploy the server with `INDEX_REPO=<owner>/hashbolt`, `REDIS_URL`, and `GITHUB_TOKEN` (read access, needed
+   while the repo is private).
 
 ```sh
 cp .env.example .env
-npm start              # http://localhost:7001/configure
+npm start                # http://localhost:7001/configure
 ```
-
-Docker:
 
 ```sh
 docker build -t hashbolt .
 docker run -d --name hashbolt -p 7001:7001 -v hashbolt:/data --env-file .env hashbolt
 ```
 
-Stremio needs HTTPS for remote addons: put it behind a reverse proxy (Caddy, nginx) and set `BASE_URL`.
-Plan for ~1 GB RAM. `/health` returns 503 until the first index is loaded.
-
-Without `INDEX_REPO` the server just serves the local `data.tsv`; build one with `npm ci && npm run build`
-(needs `HASHLISTS_DIR` pointing at a hashlists clone).
+Stremio needs HTTPS for remote addons: run it behind a reverse proxy and set `BASE_URL`.
+Without `INDEX_REPO` the server serves a local `data.tsv`, built with `npm run build` (`HASHLISTS_DIR` = a hashlists clone).
 
 ## Endpoints
 
 | Path | |
 |---|---|
 | `/configure` | install page |
-| `/:key/manifest.json` | addon manifest |
-| `/:key/stream/:type/:id.json` | cached streams |
-| `/:key/play/:hash[/:s/:e]` | adds to TorBox if needed, redirects to the file |
-| `/health` | index size, 503 until loaded |
+| `/:config/manifest.json` | addon manifest |
+| `/:config/stream/:type/:id.json` | cached streams |
+| `/:config/play/:hash[/:season/:episode]` | resolve and redirect to the TorBox link |
+| `/health` | index size; 503 until loaded |
