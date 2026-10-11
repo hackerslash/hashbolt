@@ -64,5 +64,6 @@ console.log('repo:', map.size, '| decoded', stale.length, 'of', tree.length, 'li
   for (let i = 0; i < lines.length; i += 50000) fs.writeSync(fd, (i ? '\n' : '') + lines.slice(i, i + 50000).join('\n'));
   fs.closeSync(fd);
   fs.renameSync(OUT + '.tmp', OUT);
+  fs.rmSync(OUT + '.version', { force: true });
   console.log('total:', lines.length);
 })();

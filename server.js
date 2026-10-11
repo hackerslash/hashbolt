@@ -68,7 +68,9 @@ function prefix(p) {
 
 // The index is built by GitHub Actions and published as the `data.tsv.gz` asset of release `index` on INDEX_REPO.
 // Polling costs one API call; the asset is only downloaded when it changed.
+// The loaded release version is saved beside the data so a restart doesn't re-download an unchanged index.
 let busy = false, version = null;
+try { version = fs.readFileSync(DATA + '.version', 'utf8'); } catch {}
 async function refresh() {
   if (busy) return;
   busy = true;
@@ -84,6 +86,7 @@ async function refresh() {
       fs.renameSync(DATA + '.tmp', DATA);
       load();
       version = a.updated_at;
+      fs.writeFileSync(DATA + '.version', version);
     }
   } catch (e) { console.error('refresh failed:', e.message); }
   busy = false;
