@@ -271,7 +271,7 @@ function send(res, code, body, type = 'application/json') {
 }
 
 const server = http.createServer(async (req, res) => {
-  const base = BASE_URL || `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`;
+  const base = BASE_URL || `${req.headers['x-forwarded-proto']?.split(',')[0].trim() || 'http'}://${req.headers.host}`;
   try {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
