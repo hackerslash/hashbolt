@@ -13,7 +13,8 @@ const clean = s => String(s || '').replace(/[\t\n\r]/g, ' ');
 const map = new Map();
 const add = (hash, name, bytes, url) => {
   if ((hash?.length === 40 || (hash?.length === 32 && url)) && !map.has(hash))
-    map.set(hash, [norm(clean(name)), clean(name), hash, bytes || 0, ...(url ? [clean(url)] : [])].join('\t'));
+    // Copy the key: a substring would keep its whole source string (a cache file) alive, ~2.5 GB in total.
+    map.set(Buffer.from(hash, 'latin1').toString('latin1'), [norm(clean(name)), clean(name), hash, bytes || 0, ...(url ? [clean(url)] : [])].join('\t'));
 };
 
 // Lists and their blob shas come from the git tree, so a blobless clone works: decoded lists are cached in
