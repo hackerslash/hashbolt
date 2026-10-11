@@ -509,11 +509,13 @@
           </span>
         </label>
         <ul class="consent-list" id="consent-details">
-          <li>While I use Hashbolt, it reads my TorBox torrents and web downloads, at most once every 6 hours.</li>
-          <li>For each finished item it saves the info hash, name, size and file names. For web downloads it also saves the original download link, which can give access to the file itself (for example Google Drive or gofile links).</li>
-          <li>This data goes into a shared database and an index on GitHub that may be made <strong>public</strong> for anyone to download. It is not deleted when I stop using Hashbolt.</li>
-          <li>My API key, email, account ID and IP address are never saved with it, so entries are not linked to me.</li>
-          <li>I can stop sharing at any time by uninstalling the addon.</li>
+          <li>While I use Hashbolt, it reads my TorBox torrents and web downloads, at most every 6 hours.</li>
+          <li>It saves each finished item's info hash, name, size and file names.</li>
+          <li>It saves web download links too, which can give access to the file (e.g. Google Drive, gofile).</li>
+          <li>This goes into a shared database and a GitHub index that may be made <strong>public</strong>.</li>
+          <li>Shared data is kept after I stop using Hashbolt.</li>
+          <li>My API key, email, account ID and IP are never saved, so entries aren't linked to me.</li>
+          <li>Uninstalling the addon stops sharing.</li>
         </ul>
         <div class="field-status" id="consent-status" role="status"></div>
       </section>
