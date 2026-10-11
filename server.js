@@ -101,11 +101,22 @@ function memo(map, key, ttl, fn) {
   map.set(key, { t: Date.now(), v });
   return v;
 }
-const get = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(15000) });
+const get = (url, opts = {}, ms = 15000) => fetch(url, { ...opts, signal: AbortSignal.timeout(ms) })
+  .catch(e => { throw new Error(`${new URL(url).host}: ${e.message}`); });
 
+// Cinemeta is occasionally slow or returns 504s: short timeout, one retry, and only titles get cached.
 const metas = new Map();
-const meta = (type, id) => memo(metas, id, 24 * 3600e3, () =>
-  get(`https://v3-cinemeta.strem.io/meta/${type}/${id}.json`).then(r => r.json()).then(j => j.meta));
+const meta = (type, id) => memo(metas, id, 24 * 3600e3, async () => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const r = await get(`https://v3-cinemeta.strem.io/meta/${type}/${id}.json`, {}, 5000);
+      if (!r.ok) throw new Error('Cinemeta HTTP ' + r.status);
+      const m = (await r.json()).meta;
+      if (!m?.name) throw new Error('Cinemeta has no title for ' + id);
+      return m;
+    } catch (e) { if (attempt) throw e; }
+  }
+});
 
 async function tb(key, p, opts = {}) {
   const r = await get(TB + p, { ...opts, headers: { Authorization: 'Bearer ' + key } });
@@ -146,7 +157,6 @@ async function cached(key, hashes) {
 
 async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
-  if (!m?.name) return [];
   const title = norm(m.name);
   let cands = prefix(title + ' '), y;
   if (type === 'movie') {
