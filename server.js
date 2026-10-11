@@ -288,12 +288,22 @@ function send(res, code, body, type = 'application/json') {
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
 }
 
+// Behind a proxy that mounts us under a path, X-Forwarded-Prefix names it, so every URL we hand out (stream and
+// play links, the logo, the configure page's own calls) carries it. Header values are checked because they end up
+// in that page.
+function origin(req) {
+  const proto = req.headers['x-forwarded-proto']?.split(',')[0].trim() === 'https' ? 'https' : 'http';
+  const host = /^[\w.-]+(:\d+)?$/.test(req.headers.host || '') ? req.headers.host : 'localhost';
+  const prefix = req.headers['x-forwarded-prefix'] || '';
+  return `${proto}://${host}${/^(\/[\w.-]+)+$/.test(prefix) ? prefix : ''}`;
+}
+
 const server = http.createServer(async (req, res) => {
-  const base = BASE_URL || `${req.headers['x-forwarded-proto']?.split(',')[0].trim() || 'http'}://${req.headers.host}`;
+  const base = BASE_URL || origin(req);
   try {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-    if (!p.length || p.at(-1) === 'configure') return send(res, 200, CONFIGURE, 'text/html');
+    if (!p.length || p.at(-1) === 'configure') return send(res, 200, CONFIGURE.replaceAll('__BASE__', base), 'text/html');
     if (p[0] === 'logo.png') return send(res, 200, LOGO, 'image/png');
     const withLogo = { ...manifest, logo: base + '/logo.png' };
     if (p[0] === 'manifest.json') return send(res, 200, withLogo);

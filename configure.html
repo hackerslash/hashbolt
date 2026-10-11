@@ -6,8 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Hashbolt is a Stremio addon that serves only TorBox-cached streams from the DMM hashlists, so everything it lists plays instantly.">
 <meta name="color-scheme" content="dark">
-<link rel="icon" type="image/png" href="/logo.png">
-<link rel="apple-touch-icon" href="/logo.png">
+<link rel="icon" type="image/png" href="__BASE__/logo.png">
+<link rel="apple-touch-icon" href="__BASE__/logo.png">
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -571,6 +571,7 @@
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
 const ICON_CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
 const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const BASE = '__BASE__';
 const $ = id => document.getElementById(id);
 $('copy-btn').innerHTML = ICON_COPY;
 
@@ -621,7 +622,7 @@ async function onGenerate() {
   label.textContent = 'Validating key... ';
   setStatus('checking', 'Checking with TorBox...');
   try {
-    const r = await (await fetch('/api/validate?key=' + encodeURIComponent(key))).json();
+    const r = await (await fetch(BASE + '/api/validate?key=' + encodeURIComponent(key))).json();
     setStatus(r.valid ? 'valid' : 'invalid', r.detail);
     if (r.valid) showLink(key);
   } catch (e) {
@@ -638,8 +639,8 @@ function toBase64Url(obj) {
 
 function showLink(key) {
   const path = '/' + toBase64Url({ key, contribute: true }) + '/manifest.json';
-  $('result-url').value = location.origin + path;
-  $('stremio-link').href = 'stremio://' + location.host + path;
+  $('result-url').value = BASE + path;
+  $('stremio-link').href = BASE.replace(/^https?:\/\//, 'stremio://') + path;
   $('result').style.display = 'block';
   $('sec-output').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -662,7 +663,7 @@ function copyForNuvio() {
   flash($('nuvio-btn'), ICON_CHECK + 'Copied, paste in Nuvio', 2000);
 }
 
-fetch('/health').then(r => r.json()).then(h => {
+fetch(BASE + '/health').then(r => r.json()).then(h => {
   $('stat-entries').textContent = h.entries >= 1e6 ? (h.entries / 1e6).toFixed(2) + 'M' : h.entries >= 1e3 ? Math.round(h.entries / 1e3) + 'K' : h.entries;
 }).catch(() => {});
 </script>

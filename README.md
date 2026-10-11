@@ -51,7 +51,8 @@ docker build -t hashbolt .
 docker run -d --name hashbolt -p 7001:7001 -v hashbolt:/data --env-file .env hashbolt
 ```
 
-Stremio needs HTTPS for remote addons: run it behind a reverse proxy and set `BASE_URL`.
+Stremio needs HTTPS for remote addons: run it behind a reverse proxy, sending `X-Forwarded-Proto` (and
+`X-Forwarded-Prefix` if it is mounted under a path), or set `BASE_URL`.
 Without `INDEX_REPO` the server serves a local `data.tsv`, built with `npm run build` (`HASHLISTS_DIR` = a hashlists clone).
 
 ## Endpoints
