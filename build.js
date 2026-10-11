@@ -57,7 +57,11 @@ console.log('repo:', map.size, '| decoded', decoded, 'of', files.length, 'files'
     } while (cursor !== '0');
     r.disconnect();
   }
-  fs.writeFileSync(OUT + '.tmp', [...map.values()].sort().join('\n'));
+  const lines = [...map.values()].sort();
+  map.clear();
+  const fd = fs.openSync(OUT + '.tmp', 'w');
+  for (let i = 0; i < lines.length; i += 50000) fs.writeSync(fd, (i ? '\n' : '') + lines.slice(i, i + 50000).join('\n'));
+  fs.closeSync(fd);
   fs.renameSync(OUT + '.tmp', OUT);
-  console.log('total:', map.size);
+  console.log('total:', lines.length);
 })();
