@@ -26,10 +26,11 @@ jobs:
 
       - run: npm ci
 
+      # Tree only; build.js fetches contents just for lists whose decoded cache is stale
       - name: Clone hashlists
         id: lists
         run: |
-          git clone --depth 1 https://github.com/debridmediamanager/hashlists.git hashlists
+          git clone --depth 1 --filter=blob:none --no-checkout https://github.com/debridmediamanager/hashlists.git hashlists
           echo "sha=$(git -C hashlists rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Decoded lists keyed by hashlists commit; a new commit restores the previous cache and decodes only changed files

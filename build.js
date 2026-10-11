@@ -16,32 +16,32 @@ const add = (hash, name, bytes, url) => {
     map.set(hash, [norm(clean(name)), clean(name), hash, bytes || 0, ...(url ? [clean(url)] : [])].join('\t'));
 };
 
-const files = fs.readdirSync(ROOT).filter(f => f.endsWith('.html')).map(f => path.join(ROOT, f));
-const ld = path.join(ROOT, 'lists');
-if (fs.existsSync(ld)) for (const f of fs.readdirSync(ld)) if (f.endsWith('.txt')) files.push(path.join(ld, f));
-
-// Decompressing every list takes minutes, so each is decoded once into OUT.cache/<file>.tsv ("<git blob sha>"
-// header, then "hash \t name \t bytes" lines) and only re-decoded when its content changes.
-const blobs = new Map(execFileSync('git', ['-C', ROOT, 'ls-files', '-s'], { maxBuffer: 1e8 }).toString()
-  .split('\n').filter(Boolean).map(l => { const [meta, p] = l.split('\t'); return [p, meta.split(' ')[1]]; }));
+// Lists and their blob shas come from the git tree, so a blobless clone works: decoded lists are cached in
+// OUT.cache/<file>.tsv ("<blob sha>" header, then "hash \t name \t bytes" lines), and only lists whose cache is
+// missing or stale get their contents fetched and decompressed.
 // ponytail: caches of deleted lists are never pruned; they are just ignored
+const tree = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '-z', 'HEAD'], { maxBuffer: 1e8 }).toString().split('\0')
+  .map(l => { const [meta, p] = l.split('\t'); return [p, meta.split(' ')[2]]; })
+  .filter(([p]) => /^[^/]+\.html$/.test(p) || /^lists\/[^/]+\.txt$/.test(p));
 const CACHE = OUT + '.cache';
 fs.mkdirSync(CACHE, { recursive: true });
-let decoded = 0;
-for (const f of files) {
-  const rel = path.relative(ROOT, f), stamp = blobs.get(rel.split(path.sep).join('/')) || String(fs.statSync(f).size);
-  const cf = path.join(CACHE, rel.replace(/[\\/]/g, '_') + '.tsv');
-  let txt; try { txt = fs.readFileSync(cf, 'utf8'); } catch {}
-  if (!txt?.startsWith(stamp + '\n')) {
-    decoded++;
-    const m = fs.readFileSync(f, 'utf8').match(/hashlist#(id=)?([^"'\s]+)/);
-    let d; try { d = !m || m[1] ? null : JSON.parse(LZ.decompressFromEncodedURIComponent(m[2])); } catch {}
-    txt = stamp + '\n' + (d?.torrents || []).map(t => [t.hash, clean(t.filename), t.bytes || 0].join('\t')).join('\n');
-    fs.writeFileSync(cf, txt);
-  }
-  for (const l of txt.split('\n').slice(1)) { const [h, n, b] = l.split('\t'); add(h, n, +b); }
+const cachePath = p => path.join(CACHE, p.replace(/\//g, '_') + '.tsv');
+const header = Buffer.alloc(41);
+const fresh = ([p, sha]) => {
+  try { const fd = fs.openSync(cachePath(p), 'r'); fs.readSync(fd, header, 0, 41, 0); fs.closeSync(fd); } catch { return false; }
+  return header.toString() === sha + '\n';
+};
+const stale = tree.filter(t => !fresh(t));
+const absent = stale.map(([p]) => p).filter(p => !fs.existsSync(path.join(ROOT, p)));
+if (absent.length) execFileSync('git', ['-C', ROOT, 'checkout', 'HEAD', '--pathspec-from-file=-'], { input: absent.join('\n'), stdio: ['pipe', 'ignore', 'inherit'] });
+for (const [p, sha] of stale) {
+  const m = fs.readFileSync(path.join(ROOT, p), 'utf8').match(/hashlist#(id=)?([^"'\s]+)/);
+  let d; try { d = !m || m[1] ? null : JSON.parse(LZ.decompressFromEncodedURIComponent(m[2])); } catch {}
+  fs.writeFileSync(cachePath(p), sha + '\n' + (d?.torrents || []).map(t => [t.hash, clean(t.filename), t.bytes || 0].join('\t')).join('\n'));
 }
-console.log('repo:', map.size, '| decoded', decoded, 'of', files.length, 'files');
+for (const [p] of tree)
+  for (const l of fs.readFileSync(cachePath(p), 'utf8').split('\n').slice(1)) { const [h, n, b] = l.split('\t'); add(h, n, +b); }
+console.log('repo:', map.size, '| decoded', stale.length, 'of', tree.length, 'lists, fetched', absent.length);
 
 (async () => {
   if (process.env.REDIS_URL) {
