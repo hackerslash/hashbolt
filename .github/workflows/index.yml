@@ -1,0 +1,53 @@
+name: Build index
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Clone hashlists
+        id: lists
+        run: |
+          git clone --depth 1 https://github.com/debridmediamanager/hashlists.git hashlists
+          echo "sha=$(git -C hashlists rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Decoded lists keyed by hashlists commit; a new commit restores the previous cache and decodes only changed files
+      - uses: actions/cache@v4
+        with:
+          path: data.tsv.cache
+          key: decoded-${{ steps.lists.outputs.sha }}
+          restore-keys: decoded-
+
+      - name: Build
+        run: node build.js
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gzip -6 data.tsv
+          gh release view index >/dev/null 2>&1 || gh release create index --title "Index" --notes "Auto-built every 30 minutes."
+          gh release upload index data.tsv.gz --clobber

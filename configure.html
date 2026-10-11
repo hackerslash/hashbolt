@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hashbolt — instant TorBox streams for Stremio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Hashbolt is a Stremio addon that serves only TorBox-cached streams from the DMM hashlists, so everything it lists plays instantly.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%237c3aed'/%3E%3Cpath d='M27 6 12 27h10l-2 15 16-22H26z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --hue: 292;
+
+    --bg-0: oklch(9% 0.014 var(--hue));
+    --bg-1: oklch(12.5% 0.017 var(--hue));
+    --bg-2: oklch(16% 0.02 var(--hue));
+    --bg-raised: oklch(19.5% 0.024 var(--hue));
+
+    --border: oklch(38% 0.03 var(--hue) / 0.4);
+    --border-strong: oklch(50% 0.045 var(--hue) / 0.65);
+
+    --text-0: oklch(95% 0.008 var(--hue));
+    --text-1: oklch(74% 0.02 var(--hue));
+    --text-2: oklch(53% 0.018 var(--hue));
+
+    --violet: oklch(66% 0.19 var(--hue));
+    --violet-strong: oklch(56% 0.205 var(--hue));
+    --violet-soft: oklch(80% 0.085 var(--hue));
+    --violet-wash: oklch(24% 0.04 var(--hue) / 0.5);
+
+    --blue-soft: oklch(80% 0.09 258);
+    --blue-border: oklch(52% 0.14 258 / 0.55);
+
+    --amber-soft: oklch(82% 0.11 78);
+    --amber-wash: oklch(26% 0.06 75 / 0.55);
+    --amber-border: oklch(58% 0.14 72 / 0.55);
+
+    --success: oklch(76% 0.16 152);
+    --success-border: oklch(50% 0.13 152 / 0.5);
+    --danger: oklch(69% 0.19 24);
+
+    --font-sans: 'Switzer', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Martian Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --fs-xs: 0.6875rem;
+    --fs-sm: 0.8125rem;
+    --fs-base: 0.9375rem;
+    --fs-lg: 1.25rem;
+
+    --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+    --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px; --sp-9: 96px;
+
+    --radius-sm: 3px;
+    --radius-md: 6px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--font-sans);
+    font-size: var(--fs-base);
+    color: var(--text-0);
+    background:
+      repeating-linear-gradient(0deg, oklch(20% 0.02 var(--hue) / 0.35) 0 1px, transparent 1px 48px),
+      repeating-linear-gradient(90deg, oklch(20% 0.02 var(--hue) / 0.35) 0 1px, transparent 1px 48px),
+      radial-gradient(120% 90% at 50% 0%, oklch(14% 0.02 var(--hue)) 0%, var(--bg-0) 65%);
+    background-color: var(--bg-0);
+    line-height: 1.5;
+  }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: clamp(var(--sp-6), 5vw, var(--sp-8)) clamp(var(--sp-4), 4vw, var(--sp-6)) var(--sp-9);
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: var(--sp-7);
+    align-items: start;
+  }
+
+  @media (max-width: 880px) { .page { grid-template-columns: minmax(0, 1fr); gap: var(--sp-6); } }
+
+  .rail { position: sticky; top: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-5); }
+  @media (max-width: 880px) { .rail { position: static; } }
+
+  .rail-brand { display: flex; align-items: center; gap: var(--sp-3); }
+  .rail-logo { width: 44px; height: 44px; flex-shrink: 0; filter: drop-shadow(0 3px 10px oklch(56% 0.2 var(--hue) / 0.45)); }
+  .rail-word h1 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+
+  .kicker {
+    margin: var(--sp-1) 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--violet-soft);
+  }
+
+  .rail-desc { margin: 0; font-size: var(--fs-sm); color: var(--text-1); line-height: 1.6; max-width: 34ch; }
+
+  .rail-nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    border-top: 1px solid var(--border);
+    padding-top: var(--sp-4);
+  }
+
+  .rail-nav a {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) 0;
+    font-size: var(--fs-sm);
+    color: var(--text-1);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .rail-nav a:hover { color: var(--text-0); }
+
+  @media (max-width: 880px) {
+    .rail-nav { flex-direction: row; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); border-top: none; padding-top: 0; }
+  }
+
+  .tag {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 18px;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.02em;
+    color: var(--text-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+  }
+  .tag.c-violet { color: var(--violet-soft); border-color: oklch(56% 0.2 var(--hue) / 0.5); }
+  .tag.c-blue { color: var(--blue-soft); border-color: var(--blue-border); }
+  .tag.c-green { color: var(--success); border-color: var(--success-border); }
+  .tag.c-amber { color: var(--amber-soft); border-color: var(--amber-border); }
+
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-2);
+  }
+
+  .stat {
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: oklch(12.5% 0.017 var(--hue) / 0.6);
+  }
+  .stat b { display: block; font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { font-family: var(--font-mono); font-size: 0.5625rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
+
+  .rail-foot { margin: 0; font-size: var(--fs-xs); color: var(--text-2); line-height: 1.6; max-width: 32ch; }
+
+  .panel {
+    position: relative;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--sp-6);
+  }
+  @media (max-width: 480px) { .panel { padding: var(--sp-5) var(--sp-4); } }
+
+  .corner { position: absolute; width: 11px; height: 11px; pointer-events: none; }
+  .corner.tl { top: -1px; left: -1px; border-top: 1.5px solid var(--violet); border-left: 1.5px solid var(--violet); border-top-left-radius: 2px; }
+  .corner.tr { top: -1px; right: -1px; border-top: 1.5px solid var(--violet); border-right: 1.5px solid var(--violet); border-top-right-radius: 2px; }
+  .corner.bl { bottom: -1px; left: -1px; border-bottom: 1.5px solid var(--violet); border-left: 1.5px solid var(--violet); border-bottom-left-radius: 2px; }
+  .corner.br { bottom: -1px; right: -1px; border-bottom: 1.5px solid var(--violet); border-right: 1.5px solid var(--violet); border-bottom-right-radius: 2px; }
+
+  .section { padding: var(--sp-5) 0; }
+  .section:first-of-type { padding-top: 0; }
+  .hr { height: 1px; background: var(--border); }
+
+  .section-head { display: flex; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+  .section-head .tag { margin-top: 2px; }
+
+  label {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text-0);
+  }
+
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    border: 1px solid oklch(56% 0.2 var(--hue) / 0.5);
+    color: var(--violet-soft);
+    background: var(--violet-wash);
+  }
+
+  .section-hint { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--text-2); line-height: 1.5; }
+  .section-hint a { font-weight: 500; color: var(--blue-soft); text-decoration: none; }
+  .section-hint a:hover { text-decoration: underline; }
+
+  .input-wrap { position: relative; display: flex; align-items: center; }
+  .input-wrap svg.icon-key { position: absolute; left: 13px; width: 15px; height: 15px; color: var(--text-2); pointer-events: none; }
+
+  input[type="password"], input[type="text"] {
+    width: 100%;
+    padding: 11px 42px 11px 38px;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    color: var(--text-0);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input::placeholder { color: var(--text-2); }
+  input:focus { outline: none; border-color: var(--violet); box-shadow: 0 0 0 3px oklch(66% 0.19 var(--hue) / 0.22); }
+  input.checking { border-color: var(--border-strong); }
+  input.valid { border-color: oklch(76% 0.16 152 / 0.55); }
+  input.invalid { border-color: oklch(69% 0.19 24 / 0.55); }
+
+  .toggle-visibility {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--text-2);
+    cursor: pointer;
+    padding: 6px;
+    display: flex;
+    border-radius: var(--radius-sm);
+  }
+  .toggle-visibility:hover { color: var(--text-0); background: var(--bg-raised); }
+
+  .field-status {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    margin-top: var(--sp-2);
+    min-height: 15px;
+    color: var(--text-2);
+    overflow-wrap: anywhere;
+  }
+  .field-status svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .field-status.valid { color: var(--success); }
+  .field-status.invalid { color: var(--danger); }
+
+  .spinner {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--violet);
+    animation: spin 0.6s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .features { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+  .features li {
+    display: flex;
+    gap: var(--sp-3);
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    font-size: var(--fs-xs);
+    color: var(--text-1);
+    line-height: 1.5;
+  }
+  .features li strong { color: var(--text-0); font-weight: 600; }
+  .features li .glyph { flex-shrink: 0; width: 18px; text-align: center; }
+
+  .option {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    cursor: pointer;
+    font-weight: 400;
+    transition: border-color 0.15s;
+  }
+  .option:hover { border-color: var(--border-strong); }
+  .option.invalid { border-color: oklch(69% 0.19 24 / 0.55); }
+
+  .option input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin: 1px 0 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-raised);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .option input[type="checkbox"]:checked { background: var(--violet); border-color: var(--violet); }
+  .option input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--bg-0);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .option input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 3px oklch(66% 0.19 var(--hue) / 0.22); }
+
+  .option-text { display: flex; flex-direction: column; gap: 3px; }
+  .option-text strong { font-size: var(--fs-sm); font-weight: 600; color: var(--text-0); }
+  .option-text span { font-size: var(--fs-xs); color: var(--text-2); line-height: 1.5; }
+
+  .consent-list { margin: var(--sp-3) 0 0; padding-left: 18px; font-size: var(--fs-xs); color: var(--text-1); line-height: 1.6; }
+  .consent-list li::marker { color: var(--violet-soft); }
+
+  button.primary {
+    width: 100%;
+    margin-top: var(--sp-2);
+    padding: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--violet-strong);
+    color: oklch(98% 0.01 var(--hue));
+    cursor: pointer;
+    background: var(--violet-strong);
+    box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.16);
+    transition: background 0.12s, transform 0.12s;
+  }
+  button.primary svg { width: 15px; height: 15px; transition: transform 0.15s; }
+  button.primary:hover { background: var(--violet); transform: translateY(-1px); }
+  button.primary:hover svg { transform: translateX(2px); }
+  button.primary:active { transform: translateY(0); }
+  button.primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+  #result { display: none; }
+
+  .readout {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--success);
+    margin-bottom: var(--sp-3);
+  }
+  .readout .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px oklch(76% 0.16 152 / 0.2); }
+
+  .row { display: flex; gap: var(--sp-2); }
+  #result-url { flex: 1; min-width: 0; font-size: var(--fs-xs); padding: 10px 12px; }
+
+  .icon-btn {
+    flex-shrink: 0;
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    color: var(--text-1);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .icon-btn:hover { background: var(--bg-raised); color: var(--text-0); border-color: var(--border-strong); }
+  .icon-btn.copied { color: var(--success); border-color: oklch(76% 0.16 152 / 0.4); }
+
+  .links { margin-top: var(--sp-3); display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+  a.btn, button.btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-0);
+    text-decoration: none;
+    font: 500 var(--fs-sm) var(--font-sans);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  a.btn:hover, button.btn:hover { background: var(--bg-raised); border-color: var(--violet); }
+  a.btn svg, button.btn svg { width: 15px; height: 15px; }
+  button.btn.copied { color: var(--success); border-color: oklch(76% 0.16 152 / 0.4); }
+
+  p.hint { margin: var(--sp-3) 0 0; font-size: var(--fs-xs); color: var(--text-2); line-height: 1.5; }
+  p.hint strong { color: var(--text-1); font-weight: 600; }
+
+  .warning {
+    display: flex;
+    gap: var(--sp-3);
+    margin-top: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--radius-sm);
+    background: var(--amber-wash);
+    border: 1px solid var(--amber-border);
+  }
+  .warning svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; color: var(--amber-soft); }
+  .warning-body strong { display: block; font-size: var(--fs-xs); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-0); margin-bottom: 3px; }
+  .warning-body span { font-size: var(--fs-xs); color: var(--text-1); line-height: 1.5; }
+
+  .page-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    padding: 0 var(--sp-4) var(--sp-7);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <aside class="rail">
+      <div class="rail-brand">
+        <svg class="rail-logo" viewBox="0 0 48 48" aria-hidden="true">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a855f7"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs>
+          <rect width="48" height="48" rx="11" fill="url(#g)"/>
+          <path d="M27 6 12 27h10l-2 15 16-22H26z" fill="#fff"/>
+        </svg>
+        <div class="rail-word">
+          <h1>Hashbolt</h1>
+          <p class="kicker">Stremio Addon Configuration</p>
+        </div>
+      </div>
+      <p class="rail-desc">Searches the DMM hashlists and returns only streams already cached on TorBox, so everything you see plays instantly. Your key lives in the install URL and is never stored on this server.</p>
+      <nav class="rail-nav" aria-label="Sections">
+        <a href="#sec-key"><span class="tag c-violet">01</span>TorBox Key</a>
+        <a href="#sec-how"><span class="tag c-blue">02</span>What You Get</a>
+        <a href="#sec-share"><span class="tag c-amber">03</span>Data Sharing</a>
+        <a href="#sec-output"><span class="tag c-green">04</span>Output</a>
+      </nav>
+      <div class="stats" aria-live="polite">
+        <div class="stat"><b id="stat-entries">—</b><span>Indexed</span></div>
+        <div class="stat"><b>30 min</b><span>Refresh</span></div>
+      </div>
+      <p class="rail-foot">Movies and series by IMDb id. Torrents and web downloads, cached only. No accounts.</p>
+    </aside>
+
+    <main class="panel">
+      <i class="corner tl" aria-hidden="true"></i>
+      <i class="corner tr" aria-hidden="true"></i>
+      <i class="corner bl" aria-hidden="true"></i>
+      <i class="corner br" aria-hidden="true"></i>
+
+      <section class="section" id="sec-key">
+        <div class="section-head">
+          <span class="tag c-violet">01</span>
+          <div>
+            <label for="torbox">TorBox API Key <span class="badge">Required</span></label>
+            <p class="section-hint">Used to check the TorBox cache and to start playback on your account. <a href="https://torbox.app/settings" target="_blank" rel="noopener">Get a key →</a></p>
+          </div>
+        </div>
+        <form id="key-form" class="input-wrap" onsubmit="event.preventDefault(); onGenerate()">
+          <svg class="icon-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+          <input type="password" id="torbox" placeholder="8976-5a24-4230-..." autocomplete="off" spellcheck="false" aria-describedby="torbox-status">
+          <button type="button" class="toggle-visibility" id="toggle" aria-label="Show key">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </form>
+        <div class="field-status" id="torbox-status" role="status"></div>
+      </section>
+
+      <div class="hr"></div>
+
+      <section class="section" id="sec-how">
+        <div class="section-head">
+          <span class="tag c-blue">02</span>
+          <div>
+            <label>What You Get</label>
+            <p class="section-hint">Streams show up on every movie and episode page in Stremio, sorted largest first.</p>
+          </div>
+        </div>
+        <ul class="features">
+          <li><span class="glyph">⚡</span><span><strong>Cached torrents.</strong> Every result is checked against the TorBox cache before it is listed.</span></li>
+          <li><span class="glyph">🌐</span><span><strong>Web downloads.</strong> Cached web downloads are listed too, marked 🌐⚡.</span></li>
+          <li><span class="glyph">📦</span><span><strong>Season packs.</strong> For series, the right episode is picked from inside the pack.</span></li>
+        </ul>
+      </section>
+
+      <div class="hr"></div>
+
+      <section class="section" id="sec-share">
+        <div class="section-head">
+          <span class="tag c-amber">03</span>
+          <div>
+            <label for="consent">Data Sharing <span class="badge">Required</span></label>
+            <p class="section-hint">Hashbolt grows from its users' libraries. Using it means agreeing to share anonymized torrent data from yours.</p>
+          </div>
+        </div>
+        <label class="option" for="consent" id="consent-box">
+          <input type="checkbox" id="consent" aria-describedby="consent-details">
+          <span class="option-text">
+            <strong>I agree to share anonymized torrent data from my TorBox library</strong>
+            <span id="consent-details">While you use Hashbolt, it reads your TorBox torrent list at most once every 6 hours and adds each torrent's info hash, name and size to the shared index.</span>
+          </span>
+        </label>
+        <ul class="consent-list">
+          <li>Only torrents are shared. Web download links are never read.</li>
+          <li>Nothing is linked to you: no key, email, account ID or IP address is stored with the data.</li>
+          <li>Your library is only read while your Stremio is using the addon. Uninstall Hashbolt to stop sharing.</li>
+        </ul>
+        <div class="field-status" id="consent-status" role="status"></div>
+      </section>
+
+      <button class="primary" id="generate-btn" type="submit" form="key-form">
+        Generate Install Link
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+
+      <div class="hr" style="margin-top: 32px;"></div>
+
+      <section class="section" id="sec-output">
+        <div class="section-head">
+          <span class="tag c-green">04</span>
+          <div>
+            <label>Output</label>
+            <p class="section-hint">Your manifest URL and install links appear here once the key validates and you have agreed to data sharing.</p>
+          </div>
+        </div>
+
+        <div id="result">
+          <div class="readout"><span class="dot"></span>Manifest ready</div>
+          <div class="row">
+            <input type="text" id="result-url" readonly aria-label="Manifest URL">
+            <button class="icon-btn" id="copy-btn" type="button" onclick="copyUrl()" aria-label="Copy manifest URL"></button>
+          </div>
+          <div class="links">
+            <a class="btn" id="stremio-link" href="#">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              Install in Stremio
+            </a>
+            <button class="btn" id="nuvio-btn" type="button" onclick="copyForNuvio()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Install in Nuvio
+            </button>
+          </div>
+          <p class="hint">Nuvio has no direct install link. Tap "Install in Nuvio" to copy the URL, then in the app go to <strong>Settings → Addons → Add Addon</strong> and paste it.</p>
+          <div class="warning">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            <div class="warning-body">
+              <strong>Handle as a password</strong>
+              <span>This URL contains your TorBox key. Anyone with it can add downloads to your account.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="page-footer"><span>Made with ❤️ by hackerslash</span></footer>
+
+<script>
+const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
+const ICON_CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const $ = id => document.getElementById(id);
+$('copy-btn').innerHTML = ICON_COPY;
+
+$('toggle').addEventListener('click', () => {
+  const input = $('torbox');
+  input.type = input.type === 'password' ? 'text' : 'password';
+});
+
+$('torbox').addEventListener('input', () => { setStatus('idle'); $('result').style.display = 'none'; });
+$('consent').addEventListener('change', () => {
+  $('consent-box').classList.remove('invalid');
+  $('consent-status').className = 'field-status';
+  $('consent-status').textContent = '';
+  if (!$('consent').checked) $('result').style.display = 'none';
+});
+
+function setStatus(state, text) {
+  const el = $('torbox-status'), input = $('torbox');
+  el.className = 'field-status';
+  input.classList.remove('checking', 'valid', 'invalid');
+  el.textContent = '';
+  if (state === 'idle') return;
+  if (state === 'checking') {
+    input.classList.add('checking');
+    el.innerHTML = '<span class="spinner"></span>';
+  } else {
+    el.classList.add(state);
+    input.classList.add(state);
+    el.innerHTML = state === 'valid' ? ICON_CHECK : ICON_CROSS;
+  }
+  const span = document.createElement('span');
+  span.textContent = text;
+  el.appendChild(span);
+}
+
+async function onGenerate() {
+  const key = $('torbox').value.trim();
+  if (!key) { setStatus('invalid', 'Enter your TorBox API key'); $('torbox').focus(); return; }
+  if (!$('consent').checked) {
+    $('consent-box').classList.add('invalid');
+    $('consent-status').className = 'field-status invalid';
+    $('consent-status').innerHTML = ICON_CROSS + '<span>Agree to data sharing to install Hashbolt</span>';
+    $('consent').focus();
+    return;
+  }
+  const btn = $('generate-btn'), label = btn.firstChild;
+  btn.disabled = true;
+  label.textContent = 'Validating key... ';
+  setStatus('checking', 'Checking with TorBox...');
+  try {
+    const r = await (await fetch('/api/validate?key=' + encodeURIComponent(key))).json();
+    setStatus(r.valid ? 'valid' : 'invalid', r.detail);
+    if (r.valid) showLink(key);
+  } catch (e) {
+    setStatus('invalid', 'Could not reach the server: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    label.textContent = 'Generate Install Link ';
+  }
+}
+
+function toBase64Url(obj) {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(obj)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function showLink(key) {
+  const path = '/' + toBase64Url({ key, contribute: true }) + '/manifest.json';
+  $('result-url').value = location.origin + path;
+  $('stremio-link').href = 'stremio://' + location.host + path;
+  $('result').style.display = 'block';
+  $('sec-output').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function flash(btn, html, ms) {
+  const original = btn.innerHTML;
+  btn.classList.add('copied');
+  btn.innerHTML = html;
+  setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = original; }, ms);
+}
+
+function copyUrl() {
+  $('result-url').select();
+  navigator.clipboard.writeText($('result-url').value);
+  flash($('copy-btn'), ICON_CHECK, 1500);
+}
+
+function copyForNuvio() {
+  navigator.clipboard.writeText($('result-url').value);
+  flash($('nuvio-btn'), ICON_CHECK + 'Copied, paste in Nuvio', 2000);
+}
+
+fetch('/health').then(r => r.json()).then(h => {
+  $('stat-entries').textContent = h.entries >= 1e6 ? (h.entries / 1e6).toFixed(2) + 'M' : h.entries >= 1e3 ? Math.round(h.entries / 1e3) + 'K' : h.entries;
+}).catch(() => {});
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+node_modules/
+hashlists/
+data.tsv*
+.env
