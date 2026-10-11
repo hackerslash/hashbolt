@@ -128,10 +128,10 @@ const find = (key, type, imdb, s, e) => memo(found, `${imdb}:${s}:${e}`, 10 * 60
 });
 
 // Pages through a TorBox list like MyTorbox (1000 per page, up to 50 pages); with `match`, stops at the first hit.
-async function mylist(key, k, match) {
+async function mylist(key, k, { match, fresh = true } = {}) {
   const all = [];
   for (let page = 0; page < 50; page++) {
-    const items = await tb(key, `/${k}/mylist?bypass_cache=true&limit=1000&offset=${page * 1000}`) || [];
+    const items = await tb(key, `/${k}/mylist?bypass_cache=${fresh}&limit=1000&offset=${page * 1000}`) || [];
     if (match) { const hit = items.find(match); if (hit) return hit; } else all.push(...items);
     if (items.length < 1000) break;
   }
@@ -144,28 +144,46 @@ async function mylist(key, k, match) {
 // are never stored: a library is read at most every 6h, only while its owner's Stremio is calling us.
 let redis;
 const polled = new Map();
+const COPY_EVERY = 6 * 3600;
+
+// ponytail: per-instance queue of 3 concurrent copies, make it a Redis-wide limit if instances multiply
+let running = 0;
+const waiting = [];
+async function slot(fn) {
+  if (running < 3) running++; else await new Promise(r => waiting.push(r));
+  try { return await fn(); } finally { const next = waiting.shift(); next ? next() : running--; }
+}
+
 const entry = (k, t) => JSON.stringify({ name: t.name, size: t.size,
   files: (t.files || []).map(f => f.short_name || f.name).filter(Boolean), ...(k === 'webdl' && { url: t.original_url }) });
 function contribute(key) {
   const id = crypto.createHash('sha256').update(key).digest('hex');
-  if (!process.env.REDIS_URL || Date.now() - (polled.get(id) || 0) < 6 * 3600e3) return;
+  // The local map only saves a Redis round trip; the Redis claim is what holds across restarts and instances.
+  if (!process.env.REDIS_URL || Date.now() - (polled.get(id) || 0) < COPY_EVERY * 1e3) return;
   if (polled.size >= 20000) polled.clear();
   polled.set(id, Date.now());
   redis ||= new (require('ioredis'))(process.env.REDIS_URL, { maxRetriesPerRequest: 3 });
+  const claim = 'hashbolt:polled:' + id;
   (async () => {
-    // Map dedupes repeats within a library; comparing against Redis skips entries that are already identical.
-    const fresh = new Map();
-    for (const k of ['torrents', 'webdl'])
-      for (const t of await mylist(key, k))
-        // Incomplete items have size -1 and no files and would overwrite a complete entry.
-        if (t.hash && t.files?.length && (k === 'torrents' || t.original_url)) fresh.set(String(t.hash).toLowerCase(), entry(k, t));
-    const hs = [...fresh.keys()];
-    for (let i = 0; i < hs.length; i += 1000) {
-      const chunk = hs.slice(i, i + 1000), old = await redis.hmget('hashlib', ...chunk);
-      const changed = chunk.flatMap((h, j) => old[j] === fresh.get(h) ? [] : [h, fresh.get(h)]);
-      if (changed.length) await redis.hset('hashlib', ...changed);
-    }
+    if (await redis.set(claim, '1', 'EX', COPY_EVERY, 'NX') !== 'OK') return;
+    // A failed copy releases its claim so the next stream request retries instead of waiting 6h.
+    await slot(() => copy(key)).catch(async e => { polled.delete(id); await redis.del(claim); throw e; });
   })().catch(e => console.error('contribute failed:', e.message));
+}
+
+async function copy(key) {
+  // Map dedupes repeats within a library; comparing against Redis skips entries that are already identical.
+  const fresh = new Map();
+  for (const k of ['torrents', 'webdl'])
+    for (const t of await mylist(key, k, { fresh: false }))
+      // Incomplete items have size -1 and no files and would overwrite a complete entry.
+      if (t.hash && t.files?.length && (k === 'torrents' || t.original_url)) fresh.set(String(t.hash).toLowerCase(), entry(k, t));
+  const hs = [...fresh.keys()];
+  for (let i = 0; i < hs.length; i += 1000) {
+    const chunk = hs.slice(i, i + 1000), old = await redis.hmget('hashlib', ...chunk);
+    const changed = chunk.flatMap((h, j) => old[j] === fresh.get(h) ? [] : [h, fresh.get(h)]);
+    if (changed.length) await redis.hset('hashlib', ...changed);
+  }
 }
 
 // Install URL segment: base64url JSON {key, contribute}. A bare key (pre-consent installs) never contributes.
@@ -188,7 +206,7 @@ async function streams(key, seg, type, id, base) {
 
 async function play(key, hash, s, e) {
   const k = kind(hash), web = k === 'webdl';
-  let t = await mylist(key, k, x => String(x.hash).toLowerCase() === hash);
+  let t = await mylist(key, k, { match: x => String(x.hash).toLowerCase() === hash });
   if (!t) {
     const fd = new FormData();
     if (web) {
@@ -260,4 +278,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config };
+module.exports = { norm, epRe, pick, config, slot };
