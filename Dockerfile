@@ -2,7 +2,7 @@ FROM node:22-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
-COPY server.js configure.html ./
+COPY server.js configure.html logo.png ./
 ENV PORT=7001 DATA_FILE=/data/data.tsv
 RUN mkdir /data && chown node /data
 VOLUME /data

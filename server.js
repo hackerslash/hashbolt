@@ -223,15 +223,16 @@ async function play(key, hash, s, e) {
 }
 
 const manifest = {
-  id: 'community.hashbolt', version: '1.0.0', name: 'Hashbolt',
+  id: 'community.hashbolt', version: '1.0.1', name: 'Hashbolt',
   description: 'Instant TorBox-cached streams from the DMM hashlists. Only shows what plays right away.',
   resources: ['stream'], types: ['movie', 'series'], idPrefixes: ['tt'], catalogs: [],
   behaviorHints: { configurable: true, configurationRequired: true },
 };
 const CONFIGURE = fs.readFileSync(path.join(__dirname, 'configure.html'), 'utf8');
+const LOGO = fs.readFileSync(path.join(__dirname, 'logo.png'));
 
 function send(res, code, body, type = 'application/json') {
-  res.writeHead(code, { 'Content-Type': type + '; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, { 'Content-Type': type === 'image/png' ? type : type + '; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
 }
 
@@ -241,7 +242,9 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     const p = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     if (!p.length || p.at(-1) === 'configure') return send(res, 200, CONFIGURE, 'text/html');
-    if (p[0] === 'manifest.json') return send(res, 200, manifest);
+    if (p[0] === 'logo.png') return send(res, 200, LOGO, 'image/png');
+    const withLogo = { ...manifest, logo: base + '/logo.png' };
+    if (p[0] === 'manifest.json') return send(res, 200, withLogo);
     if (p[0] === 'health') return send(res, db.length ? 200 : 503, { entries: db.length, webdl: urls.size, refreshing: busy });
     if (p[0] === 'api' && p[1] === 'validate') {
       const key = url.searchParams.get('key') || '';
@@ -253,7 +256,7 @@ const server = http.createServer(async (req, res) => {
     const cfg = config(seg);
     if (!cfg) return send(res, 400, { error: 'bad config' });
     const { key } = cfg;
-    if (route === 'manifest.json') return send(res, 200, { ...manifest, behaviorHints: { configurable: true } });
+    if (route === 'manifest.json') return send(res, 200, { ...withLogo, behaviorHints: { configurable: true } });
     if (route === 'stream' && rest.length === 2 && ['movie', 'series'].includes(rest[0])) {
       if (cfg.contribute === true) contribute(key);
       const list = await streams(key, seg, rest[0], rest[1].replace(/\.json$/, ''), base).catch(e => (console.error(e.message), []));
