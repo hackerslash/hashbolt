@@ -273,21 +273,6 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .features { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
-  .features li {
-    display: flex;
-    gap: var(--sp-3);
-    padding: 10px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-2);
-    font-size: var(--fs-xs);
-    color: var(--text-1);
-    line-height: 1.5;
-  }
-  .features li strong { color: var(--text-0); font-weight: 600; }
-  .features li .glyph { flex-shrink: 0; width: 18px; text-align: center; }
-
   .option {
     display: flex;
     align-items: flex-start;
@@ -468,18 +453,17 @@
           <p class="kicker">Stremio Addon Configuration</p>
         </div>
       </div>
-      <p class="rail-desc">Searches the DMM hashlists and returns only streams already cached on TorBox, so everything you see plays instantly. Your key lives in the install URL and is never stored on this server.</p>
+      <p class="rail-desc">Streams already cached on TorBox, so everything you see plays instantly. Your key lives in the install URL and is never stored on this server.</p>
       <nav class="rail-nav" aria-label="Sections">
         <a href="#sec-key"><span class="tag c-violet">01</span>TorBox Key</a>
-        <a href="#sec-how"><span class="tag c-blue">02</span>What You Get</a>
-        <a href="#sec-share"><span class="tag c-amber">03</span>Data Sharing</a>
-        <a href="#sec-output"><span class="tag c-green">04</span>Output</a>
+        <a href="#sec-share"><span class="tag c-amber">02</span>Data Sharing</a>
+        <a href="#sec-output"><span class="tag c-green">03</span>Output</a>
       </nav>
       <div class="stats" aria-live="polite">
         <div class="stat"><b id="stat-entries">—</b><span>Indexed</span></div>
         <div class="stat"><b>30 min</b><span>Refresh</span></div>
       </div>
-      <p class="rail-foot">Movies and series by IMDb id. Torrents and web downloads, cached only. No accounts.</p>
+      <p class="rail-foot">Movies and series by IMDb id. Cached torrents ⚡ and web downloads 🌐⚡ only.</p>
     </aside>
 
     <main class="panel">
@@ -508,42 +492,27 @@
 
       <div class="hr"></div>
 
-      <section class="section" id="sec-how">
-        <div class="section-head">
-          <span class="tag c-blue">02</span>
-          <div>
-            <label>What You Get</label>
-            <p class="section-hint">Streams show up on every movie and episode page in Stremio, sorted largest first.</p>
-          </div>
-        </div>
-        <ul class="features">
-          <li><span class="glyph">⚡</span><span><strong>Cached torrents.</strong> Every result is checked against the TorBox cache before it is listed.</span></li>
-          <li><span class="glyph">🌐</span><span><strong>Web downloads.</strong> Cached web downloads are listed too, marked 🌐⚡.</span></li>
-          <li><span class="glyph">📦</span><span><strong>Season packs.</strong> For series, the right episode is picked from inside the pack.</span></li>
-        </ul>
-      </section>
-
-      <div class="hr"></div>
-
       <section class="section" id="sec-share">
         <div class="section-head">
-          <span class="tag c-amber">03</span>
+          <span class="tag c-amber">02</span>
           <div>
             <label for="consent">Data Sharing <span class="badge">Required</span></label>
-            <p class="section-hint">Hashbolt grows from its users' libraries. Using it means agreeing to share anonymized torrent data from yours.</p>
+            <p class="section-hint">Hashbolt's index grows from its users' libraries, so sharing is a condition of using it.</p>
           </div>
         </div>
         <label class="option" for="consent" id="consent-box">
           <input type="checkbox" id="consent" aria-describedby="consent-details">
           <span class="option-text">
-            <strong>I agree to share anonymized torrent data from my TorBox library</strong>
-            <span id="consent-details">While you use Hashbolt, it reads your TorBox torrent list at most once every 6 hours and adds each torrent's info hash, name and size to the shared index.</span>
+            <strong>I agree to share my TorBox library with the Hashbolt index</strong>
+            <span>I understand that:</span>
           </span>
         </label>
-        <ul class="consent-list">
-          <li>Only torrents are shared. Web download links are never read.</li>
-          <li>Nothing is linked to you: no key, email, account ID or IP address is stored with the data.</li>
-          <li>Your library is only read while your Stremio is using the addon. Uninstall Hashbolt to stop sharing.</li>
+        <ul class="consent-list" id="consent-details">
+          <li>While I use Hashbolt, it reads my TorBox torrents and web downloads, at most once every 6 hours.</li>
+          <li>For each finished item it saves the info hash, name, size and file names. For web downloads it also saves the original download link, which can give access to the file itself (for example Google Drive or gofile links).</li>
+          <li>This data goes into a shared database and a <strong>public</strong> index on GitHub that anyone can download. It is not deleted when I stop using Hashbolt.</li>
+          <li>My API key, email, account ID and IP address are never saved with it, so entries are not linked to me.</li>
+          <li>I can stop sharing at any time by uninstalling the addon.</li>
         </ul>
         <div class="field-status" id="consent-status" role="status"></div>
       </section>
@@ -557,7 +526,7 @@
 
       <section class="section" id="sec-output">
         <div class="section-head">
-          <span class="tag c-green">04</span>
+          <span class="tag c-green">03</span>
           <div>
             <label>Output</label>
             <p class="section-hint">Your manifest URL and install links appear here once the key validates and you have agreed to data sharing.</p>
@@ -640,7 +609,7 @@ async function onGenerate() {
   if (!$('consent').checked) {
     $('consent-box').classList.add('invalid');
     $('consent-status').className = 'field-status invalid';
-    $('consent-status').innerHTML = ICON_CROSS + '<span>Agree to data sharing to install Hashbolt</span>';
+    $('consent-status').innerHTML = ICON_CROSS + '<span>Agree to share your library to install Hashbolt</span>';
     $('consent').focus();
     return;
   }

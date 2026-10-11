@@ -6,7 +6,7 @@ Stremio addon that serves **only TorBox-cached streams** for movies and series, 
 - Torrents (⚡) and web downloads (🌐⚡), checked against the TorBox cache before listing
 - Season packs: the right episode file is picked automatically
 - Each user installs with their own TorBox key from `/configure`; keys are never stored server-side
-- Users must opt in to sharing anonymized torrent data (hash, name, size) from their library, which grows the index
+- Users must agree to share their library (hashes, names, sizes, file names, web download links) to grow the index
 
 ## How the index updates
 
@@ -22,13 +22,16 @@ lists that changed. The server needs no git; its only dependency is `ioredis`, f
 
 ## Data sharing
 
-The configure page requires consent before it hands out an install link. The consent is encoded in the install URL
-(`base64url({"key", "contribute": true})`); installs with a bare key never contribute.
+Sharing is a condition of use: the configure page only hands out an install link after the user accepts a consent
+that spells out everything below. Consent is encoded in the install URL (`base64url({"key", "contribute": true})`);
+installs with a bare key never contribute.
 
-For opted-in users, a stream request reads their TorBox torrent list at most once every 6 hours (throttled in memory
-by a SHA-256 of the key) and `HSETNX`es `{name, size}` per info hash into the Redis `hashlib`. The next index build
-picks them up. Web downloads are skipped, and nothing ties an entry to the user. Without `REDIS_URL` on the
-server, nothing is collected.
+For opted-in users, a stream request reads their TorBox torrents and web downloads (paginated like MyTorbox,
+1000 per page), at most once every 6 hours, throttled in memory by a SHA-256 of the key. Each finished item is written
+to the Redis `hashlib` that MyTorbox also feeds, in the same shape: lowercase hash ->
+`{name, size, files, url}` (`url` = the web download's original link, web downloads only). Entries are deduplicated
+by hash, and ones already identical in Redis are not rewritten. No key, email, `auth_id` or IP is stored. Without
+`REDIS_URL` on the server, nothing is collected.
 
 ## Setup
 

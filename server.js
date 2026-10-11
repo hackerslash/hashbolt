@@ -127,21 +127,44 @@ const find = (key, type, imdb, s, e) => memo(found, `${imdb}:${s}:${e}`, 10 * 60
   return out.sort((a, b) => b.size - a.size);
 });
 
-// Opted-in libraries feed the shared index with torrent hash, name and size only, never who they came from.
-// Keys are never stored: a library is read at most every 6h, and only while its owner's Stremio is calling us.
+// Pages through a TorBox list like MyTorbox (1000 per page, up to 50 pages); with `match`, stops at the first hit.
+async function mylist(key, k, match) {
+  const all = [];
+  for (let page = 0; page < 50; page++) {
+    const items = await tb(key, `/${k}/mylist?bypass_cache=true&limit=1000&offset=${page * 1000}`) || [];
+    if (match) { const hit = items.find(match); if (hit) return hit; } else all.push(...items);
+    if (items.length < 1000) break;
+  }
+  return match ? undefined : all;
+}
+
+// Opted-in libraries go into the same Redis `hashlib` as MyTorbox, in its entry shape:
+// lowercase hash -> {name, size, files, url (webdl only)}. A webdl hash is md5(original_url), and TorBox claims a
+// cached webdl from that URL even after it expires. Nothing identifying is kept (no key, auth_id or IP), and keys
+// are never stored: a library is read at most every 6h, only while its owner's Stremio is calling us.
 let redis;
 const polled = new Map();
+const entry = (k, t) => JSON.stringify({ name: t.name, size: t.size,
+  files: (t.files || []).map(f => f.short_name || f.name).filter(Boolean), ...(k === 'webdl' && { url: t.original_url }) });
 function contribute(key) {
   const id = crypto.createHash('sha256').update(key).digest('hex');
   if (!process.env.REDIS_URL || Date.now() - (polled.get(id) || 0) < 6 * 3600e3) return;
   if (polled.size >= 20000) polled.clear();
   polled.set(id, Date.now());
-  redis ||= new (require('ioredis'))(process.env.REDIS_URL, { tls: {}, maxRetriesPerRequest: 3 });
+  redis ||= new (require('ioredis'))(process.env.REDIS_URL, { maxRetriesPerRequest: 3 });
   (async () => {
-    const m = redis.multi();
-    for (const t of await tb(key, '/torrents/mylist?bypass_cache=true') || [])
-      if (/^[a-f0-9]{40}$/.test(t.hash)) m.hsetnx('hashlib', t.hash, JSON.stringify({ name: t.name, size: t.size }));
-    await m.exec();
+    // Map dedupes repeats within a library; comparing against Redis skips entries that are already identical.
+    const fresh = new Map();
+    for (const k of ['torrents', 'webdl'])
+      for (const t of await mylist(key, k))
+        // Incomplete items have size -1 and no files and would overwrite a complete entry.
+        if (t.hash && t.files?.length && (k === 'torrents' || t.original_url)) fresh.set(String(t.hash).toLowerCase(), entry(k, t));
+    const hs = [...fresh.keys()];
+    for (let i = 0; i < hs.length; i += 1000) {
+      const chunk = hs.slice(i, i + 1000), old = await redis.hmget('hashlib', ...chunk);
+      const changed = chunk.flatMap((h, j) => old[j] === fresh.get(h) ? [] : [h, fresh.get(h)]);
+      if (changed.length) await redis.hset('hashlib', ...changed);
+    }
   })().catch(e => console.error('contribute failed:', e.message));
 }
 
@@ -165,7 +188,7 @@ async function streams(key, seg, type, id, base) {
 
 async function play(key, hash, s, e) {
   const k = kind(hash), web = k === 'webdl';
-  let t = (await tb(key, `/${k}/mylist?bypass_cache=true`) || []).find(x => x.hash === hash);
+  let t = await mylist(key, k, x => String(x.hash).toLowerCase() === hash);
   if (!t) {
     const fd = new FormData();
     if (web) {
