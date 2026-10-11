@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { norm, epRe, pick, config, slot } = require('./server');
+const { norm, epRe, pick, config, limiter } = require('./server');
 
 assert.equal(norm('[QxR] Schindler’s List (1993) 1080p'), 'schindlers list 1993 1080p');
 assert.equal(norm('Amélie.2001.BluRay'), 'amelie 2001 bluray');
@@ -18,6 +18,7 @@ assert.deepEqual(config('8976-5a24-4230'), { key: '8976-5a24-4230' });
 assert.equal(config('bad key!'), null);
 assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contribute, undefined);
 (async () => {
+  const slot = limiter(3);
   let live = 0, peak = 0;
   const done = await Promise.all(Array.from({ length: 10 }, (_, i) => slot(async () => {
     peak = Math.max(peak, ++live);

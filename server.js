@@ -91,19 +91,38 @@ async function tb(key, p, opts = {}) {
   if (!j.success) throw new Error(`TorBox ${p.split('?')[0]}: ${j.detail || j.error || r.status}`);
   return j.data;
 }
+// ponytail: per-instance limits, move to Redis if instances multiply
+function limiter(n) {
+  let running = 0;
+  const waiting = [];
+  return async fn => {
+    if (running < n) running++; else await new Promise(r => waiting.push(r));
+    try { return await fn(); } finally { const next = waiting.shift(); next ? next() : running--; }
+  };
+}
+const checkSlot = limiter(8);
+
+// TorBox's cache is global, so each hash's status is shared by every user for 10 min: its video files, or null.
+// Requests in flight are shared too, so episodes of one show (same season packs) check each pack once.
+const checks = new Map();
 async function cached(key, hashes) {
-  const parts = [];
+  if (checks.size > 50000) checks.clear();
+  const now = Date.now();
+  const todo = hashes.filter(h => !(now - checks.get(h)?.t < 10 * 60e3));
   for (const k of ['torrents', 'webdl']) {
-    const hs = hashes.filter(h => kind(h) === k);
-    for (let i = 0; i < hs.length; i += 100)
-      parts.push(tb(key, `/${k}/checkcached?format=object&list_files=true&hash=${hs.slice(i, i + 100).join(',')}`));
+    const hs = todo.filter(h => kind(h) === k);
+    for (let i = 0; i < hs.length; i += 100) {
+      const batch = hs.slice(i, i + 100);
+      const req = checkSlot(() => tb(key, `/${k}/checkcached?format=object&list_files=true&hash=${batch.join(',')}`));
+      for (const h of batch) checks.set(h, { t: now, p: req.then(d => d?.[h] ? (d[h].files || []).filter(f => VIDEO.test(f.name)) : null)
+        .catch(e => { checks.delete(h); throw e; }) });
+    }
   }
-  return Object.assign({}, ...await Promise.all(parts));
+  const files = await Promise.all(hashes.map(h => checks.get(h).p));
+  return Object.fromEntries(hashes.flatMap((h, i) => files[i] ? [[h, files[i]]] : []));
 }
 
-// TorBox's cache is global, so lookups are shared across users; only the play URLs carry a key.
-const found = new Map();
-const find = (key, type, imdb, s, e) => memo(found, `${imdb}:${s}:${e}`, 10 * 60e3, async () => {
+async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
   if (!m?.name) return [];
   const title = norm(m.name);
@@ -116,16 +135,18 @@ const find = (key, type, imdb, s, e) => memo(found, `${imdb}:${s}:${e}`, 10 * 60
   }
   // ponytail: cap at 500 biggest candidates, page through TorBox if long-running shows lose results
   cands = cands.sort((a, b) => b.b - a.b).slice(0, 500);
-  const c = await cached(key, cands.map(r => r.h));
+  const hs = cands.map(r => r.h);
+  // A shared check may have run on another user's failing key; retry once on our own.
+  const c = await cached(key, hs).catch(() => cached(key, hs));
   const ep = s && epRe(s, e);
   const out = [];
   for (const r of cands) {
-    const f = c[r.h] && pick(c[r.h].files || [], r.n, ep);
+    const f = c[r.h] && pick(c[r.h], r.n, ep);
     if (f) out.push({ ...r, file: path.basename(f.name), size: f.size,
       res: ((r.n + ' ' + f.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase() });
   }
   return out.sort((a, b) => b.size - a.size);
-});
+}
 
 // Pages through a TorBox list like MyTorbox (1000 per page, up to 50 pages); with `match`, stops at the first hit.
 async function mylist(key, k, { match, fresh = true } = {}) {
@@ -146,13 +167,7 @@ let redis;
 const polled = new Map();
 const COPY_EVERY = 6 * 3600;
 
-// ponytail: per-instance queue of 3 concurrent copies, make it a Redis-wide limit if instances multiply
-let running = 0;
-const waiting = [];
-async function slot(fn) {
-  if (running < 3) running++; else await new Promise(r => waiting.push(r));
-  try { return await fn(); } finally { const next = waiting.shift(); next ? next() : running--; }
-}
+const copySlot = limiter(3);
 
 const entry = (k, t) => JSON.stringify({ name: t.name, size: t.size,
   files: (t.files || []).map(f => f.short_name || f.name).filter(Boolean), ...(k === 'webdl' && { url: t.original_url }) });
@@ -167,7 +182,7 @@ function contribute(key) {
   (async () => {
     if (await redis.set(claim, '1', 'EX', COPY_EVERY, 'NX') !== 'OK') return;
     // A failed copy releases its claim so the next stream request retries instead of waiting 6h.
-    await slot(() => copy(key)).catch(async e => { polled.delete(id); await redis.del(claim); throw e; });
+    await copySlot(() => copy(key)).catch(async e => { polled.delete(id); await redis.del(claim); throw e; });
   })().catch(e => console.error('contribute failed:', e.message));
 }
 
@@ -203,6 +218,10 @@ async function streams(key, seg, type, id, base) {
     behaviorHints: { bingeGroup: 'hashbolt-' + r.res, filename: r.file, videoSize: r.size },
   }));
 }
+
+// Players often request a stream URL twice at once; share one resolve and reuse the link for 5 min.
+const links = new Map();
+const link = (key, hash, s, e) => memo(links, `${key}:${hash}:${s}:${e}`, 5 * 60e3, () => play(key, hash, s, e));
 
 async function play(key, hash, s, e) {
   const k = kind(hash), web = k === 'webdl';
@@ -263,7 +282,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { streams: list });
     }
     if (route === 'play' && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0]) && rest.slice(1).every(x => /^\d+$/.test(x))) {
-      res.writeHead(302, { Location: await play(key, rest[0].toLowerCase(), rest[1], rest[2]) });
+      res.writeHead(302, { Location: await link(key, rest[0].toLowerCase(), rest[1], rest[2]) });
       return res.end();
     }
     send(res, 404, { error: 'not found' });
@@ -281,4 +300,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config, slot };
+module.exports = { norm, epRe, pick, config, limiter };
