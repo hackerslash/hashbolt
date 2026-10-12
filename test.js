@@ -51,5 +51,18 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
   assert.deepEqual(done, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   await assert.rejects(slot(async () => { throw new Error('x'); }));
   assert.equal(await slot(async () => 'freed'), 'freed');
+  globalThis.fetch = async url => {
+    url = String(url);
+    if (url.includes('cinemeta')) return { ok: true, json: async () => ({ meta: { name: 'Amélie', year: 2001 } }) };
+    const q = new URL(url).searchParams, hs = q.get('hash').split(',');
+    const data = Object.fromEntries(hs.map(h =>
+      [h, q.has('list_files') ? { files: [{ name: 'Amelie.2001.1080p.mkv', size: 1e9 }] } : { size: 1 }]));
+    return { ok: true, json: async () => ({ success: true, data }) };
+  };
+  const { find } = require('./server');
+  const out = await find('k', 'movie', 'tt0119177', '', '');
+  assert.equal(out.length, 2);
+  assert(out.every(r => r.file && r.size && r.res));
+  assert(out[0].size >= out[1].size);
   console.log('ok');
 })();

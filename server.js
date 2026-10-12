@@ -13,6 +13,7 @@ const INDEX_REPO = process.env.INDEX_REPO;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.tsv');
 const TB = 'https://api.torbox.app/v1/api';
 const VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm|wmv)$/i;
+const MAX_STREAMS = 40;
 
 const norm = s => s.replace(/^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/, '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -135,25 +136,33 @@ function limiter(n) {
 }
 const checkSlot = limiter(8);
 
-// TorBox's cache is global, so each hash's status is shared by every user for 10 min: its video files, or null.
-// Requests in flight are shared too, so episodes of one show (same season packs) check each pack once.
-const checks = new Map();
-async function cached(key, hashes) {
-  if (checks.size > 50000) checks.clear();
+// TorBox's cache is global, so each hash's answer is shared by every user for 10 min, and requests in flight are
+// shared too. Two layers: `present` asks only whether hashes are cached (small responses); `listed` fetches file
+// lists, which are large, and is only asked about hashes already known to be cached.
+const checks = new Map(), lists = new Map();
+function batchInto(map, key, hashes, url) {
+  if (map.size > 50000) map.clear();
   const now = Date.now();
-  const todo = hashes.filter(h => !(now - checks.get(h)?.t < 10 * 60e3));
+  const todo = hashes.filter(h => !(now - map.get(h)?.t < 10 * 60e3));
   for (const k of ['torrents', 'webdl']) {
     const hs = todo.filter(h => kind(h) === k);
     for (let i = 0; i < hs.length; i += 100) {
       const batch = hs.slice(i, i + 100);
-      const req = checkSlot(() => tb(key, `/${k}/checkcached?format=object&list_files=true&hash=${batch.join(',')}`));
-      for (const h of batch) checks.set(h, { t: now, p: req.then(d => d?.[h] ? (d[h].files || []).filter(f => VIDEO.test(f.name)) : null)
-        .catch(e => { checks.delete(h); throw e; }) });
+      const req = checkSlot(() => tb(key, url(k, batch)));
+      for (const h of batch) map.set(h, { t: now, p: req.then(d => d?.[h] || null)
+        .catch(e => { map.delete(h); throw e; }) });
     }
   }
-  const files = await Promise.all(hashes.map(h => checks.get(h).p));
-  return Object.fromEntries(hashes.flatMap((h, i) => files[i] ? [[h, files[i]]] : []));
+  return Promise.all(hashes.map(h => map.get(h).p));
 }
+const present = (key, hashes) => batchInto(checks, key, hashes,
+  (k, b) => `/${k}/checkcached?format=object&hash=${b.join(',')}`);
+const listed = (key, hashes) => batchInto(lists, key, hashes,
+  (k, b) => `/${k}/checkcached?format=object&list_files=true&hash=${b.join(',')}`)
+  .then(es => Object.fromEntries(hashes.flatMap((h, i) => {
+    const files = (es[i]?.files || []).filter(f => VIDEO.test(f.name));
+    return files.length ? [[h, files]] : [];
+  })));
 
 async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
@@ -165,17 +174,29 @@ async function find(key, type, imdb, s, e) {
   } else {
     cands = cands.filter(r => { const x = r.k.match(/\bs(\d+) ?e(\d+)\b/); return !x || (+x[1] === +s && +x[2] === +e); });
   }
+  // Biggest first: presence (small responses, no file lists) for all chunks runs concurrently,
+  // then file lists are fetched only for the first ~20 cached hashes, in chunk order. A popular
+  // title answers with ~5 small calls + 1 file-list call instead of ~5 full file-list calls.
+  // ponytail: page through TorBox if long-running shows lose results past the 500 cap
   // ponytail: cap at 500 biggest candidates, page through TorBox if long-running shows lose results
   cands = cands.sort((a, b) => b.b - a.b).slice(0, 500);
-  const hs = cands.map(r => r.h);
   // A shared check may have run on another user's failing key; retry once on our own.
-  const c = await cached(key, hs).catch(() => cached(key, hs));
+  const retry = fn => fn().catch(() => fn());
+  const pres = await retry(() => present(key, cands.map(r => r.h)));
+  const hits = cands.filter((r, i) => pres[i]);
+  // File lists go biggest-first, a window at a time, until MAX_STREAMS resolve. A hit can still fail to resolve
+  // (a season pack without the episode), so the next window picks up where this one stopped.
   const ep = s && epRe(s, e);
   const out = [];
-  for (const r of cands) {
-    const f = c[r.h] && pick(c[r.h], r.n, ep, y);
-    const res = ((r.n + ' ' + f?.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
-    if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: res === '4K' ? '2160P' : res });
+  for (let i = 0; i < hits.length && out.length < MAX_STREAMS;) {
+    const win = hits.slice(i, i + MAX_STREAMS - out.length);
+    i += win.length;
+    const c = await retry(() => listed(key, win.map(r => r.h)));
+    for (const r of win) {
+      const f = c[r.h] && pick(c[r.h], r.n, ep, y);
+      const res = ((r.n + ' ' + f?.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
+      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: res === '4K' ? '2160P' : res });
+    }
   }
   return out.sort((a, b) => b.size - a.size);
 }
@@ -343,4 +364,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h) };
+module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find };

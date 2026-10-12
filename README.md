@@ -19,7 +19,8 @@ GitHub Actions, every 30 min                     Hashbolt server, every 10 min
 - **Build:** each list's decoded contents are cached by git blob sha (`actions/cache`), so a run only fetches and
   decompresses lists that changed.
 - **Lookup:** IMDb id -> Cinemeta title -> binary search over the sorted index (kept as one buffer, ~500 MB RSS)
-  -> TorBox cache check. Check results are cached per hash for 10 min and shared across users and episodes.
+  -> TorBox presence check (no file lists), then file lists for cached hits, biggest first, until 40 streams resolve.
+  Check results are cached per hash for 10 min and shared across users and episodes.
 - **Play:** `/play` reuses the item if it's already in the user's library, otherwise adds it only if cached, then
   redirects to the TorBox link (reused for 5 min).
 
