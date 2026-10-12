@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.DATA_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-')), 'data.tsv');
-const { norm, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate } = require('./server');
+const { norm, seasonFit, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate } = require('./server');
 
 const h = c => c.repeat(40), w = c => c.repeat(32);
 fs.writeFileSync(process.env.DATA_FILE, [
@@ -35,6 +35,20 @@ assert.equal(norm('[QxR] Schindler’s List (1993) 1080p'), 'schindlers list 199
 assert.equal(norm('Amélie.2001.BluRay'), 'amelie 2001 bluray');
 assert.equal(norm('www.UIndex.org    -    Foo Bar 2026'), 'foo bar 2026');
 assert.equal(norm('Mr.Robot - S01'), 'mr robot s01');
+const fit = (name, s, e) => seasonFit(' ' + norm(name), s, e);
+assert.equal(fit('S01E02 1080p', 1, 2), 0);
+assert.equal(fit('S01E03 1080p', 1, 2), -1);
+assert.equal(fit('S01E01-E10 1080p', 1, 5), 0);
+assert.equal(fit('S01E01-S01E04 1080p', 1, 5), -1);
+assert.equal(fit('S01 1080p BluRay', 1, 2), 0);
+assert.equal(fit('S03 1080p BluRay', 1, 2), -1);
+assert.equal(fit('S01-S05 COMPLETE 1080p', 3, 1), 0);
+assert.equal(fit('Season 1-5 1080p', 6, 1), -1);
+assert.equal(fit('Season 2 1080p', 2, 4), 0);
+assert.equal(fit('Season 1 1080p', 2, 4), -1);
+assert.equal(fit('Complete Series 1080p', 4, 1), 0);
+assert.equal(fit('2008 1080p BluRay', 1, 2), 1);
+assert.equal(fit('with Benefits 2011 1080p', 1, 2), 1);
 const ep = epRe(1, 2);
 assert(ep.test('Show.S01E02.mkv') && ep.test('Show 1x02.mkv') && ep.test('s1 e2'));
 assert(!ep.test('Show.S01E20.mkv') && !ep.test('Show.S11E02.mkv'));

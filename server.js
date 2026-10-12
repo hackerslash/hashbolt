@@ -19,6 +19,20 @@ const MAX_STREAMS = 40, QUOTA = { '2160P': 25, '1080P': 15 };
 
 const norm = s => s.replace(/^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/, '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+// How a release's name (past the title) fits season s, episode e: 0 names it (or a range or complete run holding it),
+// 1 says nothing about seasons, -1 names another season or episode.
+function seasonFit(rest, s, e) {
+  const ep = rest.match(/\bs(\d+) ?e(\d+)(?: (?:s\d+ ?)?e(\d+))?\b/);
+  if (ep) return +ep[1] === s && e >= +ep[2] && e <= +(ep[3] || ep[2]) ? 0 : -1;
+  const range = rest.match(/\bs(\d+) s(\d+)\b|\bseasons? (\d+) (?:to )?(\d+)\b/);
+  if (range) {
+    const [a, b] = (range[1] ? range.slice(1, 3) : range.slice(3, 5)).map(Number);
+    if (b >= a && b < 100) return s >= a && s <= b ? 0 : -1;
+  }
+  const named = [...rest.matchAll(/\bs(\d+)\b|\bseason (\d+)\b/g)].map(m => +(m[1] || m[2]));
+  if (named.length) return named.includes(s) ? 0 : -1;
+  return /\b(complete|collection|integral)\b/.test(rest) ? 0 : 1;
+}
 const epRe = (s, e) => new RegExp(`(s0*${+s}[ ._-]*e0*${+e}|\\b0*${+s}x0*${+e})(?!\\d)`, 'i');
 const biggest = a => a.sort((x, y) => y.size - x.size)[0];
 // Streams list by resolution, then source (REMUX > BluRay > WEB-DL > WEBRip > HDTV > other), then size.
@@ -171,15 +185,15 @@ async function cached(key, hashes) {
 async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
   const title = norm(m.name);
-  let cands = prefix(title + ' '), y;
+  let cands = prefix(title + ' ').map(r => ({ ...r, rest: r.k.slice(title.length), fit: 0 })), y;
   if (type === 'movie') {
     y = +String(m.year || m.releaseInfo || '').slice(0, 4);
-    if (y) cands = cands.filter(r => { const yr = r.k.slice(title.length).match(/\b(19|20)\d\d\b/); return yr && Math.abs(yr[0] - y) <= 1; });
+    if (y) cands = cands.filter(r => { const yr = r.rest.match(/\b(19|20)\d\d\b/); return yr && Math.abs(yr[0] - y) <= 1; });
   } else {
-    cands = cands.filter(r => { const x = r.k.match(/\bs(\d+) ?e(\d+)\b/); return !x || (+x[1] === +s && +x[2] === +e); });
+    cands = cands.map(r => ({ ...r, fit: seasonFit(r.rest, +s, +e) })).filter(r => r.fit >= 0);
   }
-  // The 500 biggest candidates are checked; a long-running show's smaller files past that are dropped.
-  cands = cands.sort((a, b) => b.b - a.b).slice(0, 500);
+  // 500 candidates are checked: those naming the season first, then by size.
+  cands = cands.sort((a, b) => a.fit - b.fit || b.b - a.b).slice(0, 500);
   // One round: file lists come back only for cached hashes, so a separate "is it cached" pass would only add a
   // round trip. A shared check may have run on another user's failing key; retry once on our own.
   const hs = cands.map(r => r.h);
@@ -363,4 +377,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate };
+module.exports = { norm, seasonFit, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate };
