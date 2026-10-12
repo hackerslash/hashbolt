@@ -20,7 +20,8 @@ GitHub Actions, every 30 min (dispatched)       Hashbolt server, every 10 min
   decompresses lists that changed.
 - **Schedule:** GitHub's cron is best-effort and skips most slots, so the deployment starts the workflow every
   30 minutes with `gh workflow run index.yml`; the workflow's own cron is a 6-hourly backup.
-- **Lookup:** IMDb id -> Cinemeta title -> binary search over the sorted index (kept as one buffer, ~500 MB RSS)
+- **Lookup:** IMDb id -> Cinemeta title -> binary search over the sorted index (kept as one buffer, ~500 MB RSS),
+  with and without a leading "the"; movies must match the year, series drop releases naming another season
   -> one round of TorBox cache checks with file lists (at most 5 parallel calls), cached per hash for 10 min and
   shared across users and episodes. Up to 25 streams at 2160p and 15 at 1080p, spare slots to the next best,
   listed by resolution, then source, then size.
