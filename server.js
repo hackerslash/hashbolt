@@ -353,7 +353,7 @@ const server = http.createServer(async (req, res) => {
     if (route === 'stream' && rest.length === 2 && ['movie', 'series'].includes(rest[0])) {
       if (cfg.contribute === true) contribute(key);
       const list = await streams(key, seg, rest[0], rest[1].replace(/\.json$/, ''), base).catch(e => (console.error(e.message), []));
-      return send(res, 200, { streams: list });
+      return send(res, 200, { streams: list, cacheMaxAge: 600 });
     }
     if (route === 'play' && rest.length === 2 && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0])) {
       res.writeHead(302, { Location: await link(key, rest[0].toLowerCase(), rest[1]) });
