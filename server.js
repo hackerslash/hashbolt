@@ -270,7 +270,7 @@ async function streams(key, seg, type, id, base) {
   if (!/^tt\d+$/.test(imdb) || (ep && !(/^\d+$/.test(s) && /^\d+$/.test(e)))) return [];
   return (await find(key, type, imdb, ep ? s : '', ep ? e : '')).map(r => ({
     name: (r.h.length === 40 ? 'Hashbolt ⚡\n' : 'Hashbolt 🌐⚡\n') + r.res,
-    description: `${r.n}${ep ? '\n' + r.file : ''}\n💾 ${(r.size / 1e9).toFixed(2)} GB`,
+    description: `${ep ? r.file : r.n}\n💾 ${(r.size / 1e9).toFixed(2)} GB`,
     url: `${base}/${seg}/play/${r.h}/${encodeURIComponent(r.file)}`,
     behaviorHints: { bingeGroup: 'hashbolt-' + r.res, filename: r.file, videoSize: r.size },
   }));
