@@ -19,6 +19,11 @@ const norm = s => s.replace(/^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/, '').normalize('
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
 const epRe = (s, e) => new RegExp(`(s0*${+s}[ ._-]*e0*${+e}|\\b0*${+s}x0*${+e})(?!\\d)`, 'i');
 const biggest = a => a.sort((x, y) => y.size - x.size)[0];
+// Streams list by resolution, then source (REMUX > BluRay > WEB-DL > WEBRip > HDTV > other), then size.
+const RES = { '2160P': 4, '1080P': 3, '720P': 2, '480P': 1 };
+const SOURCES = [/remux/i, /blu-?ray|bdrip|brrip/i, /web[ .-]?dl|\bweb\b/i, /webrip/i, /hdtv/i];
+const source = name => { const i = SOURCES.findIndex(q => q.test(name)); return i < 0 ? 0 : SOURCES.length - i; };
+const byQuality = (a, b) => (RES[b.res] || 0) - (RES[a.res] || 0) || b.q - a.q || b.size - a.size;
 // Episode: the file matching SxxEyy (or the only video of a single-episode torrent). Movie: the biggest video,
 // preferring files with the release year so a multi-movie pack yields the right film.
 const pick = (files, name, ep, year) => {
@@ -195,10 +200,10 @@ async function find(key, type, imdb, s, e) {
     for (const r of win) {
       const f = c[r.h] && pick(c[r.h], r.n, ep, y);
       const res = ((r.n + ' ' + f?.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
-      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: res === '4K' ? '2160P' : res });
+      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: res === '4K' ? '2160P' : res, q: source(r.n + ' ' + f.name) });
     }
   }
-  return out.sort((a, b) => b.size - a.size);
+  return out.sort(byQuality);
 }
 
 // Pages through a TorBox list like MyTorbox (1000 per page, up to 50 pages); with `match`, stops at the first hit.
@@ -364,4 +369,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find };
+module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality };

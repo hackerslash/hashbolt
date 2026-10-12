@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.DATA_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-')), 'data.tsv');
-const { norm, epRe, pick, config, limiter, load, prefix, webUrl } = require('./server');
+const { norm, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality } = require('./server');
 
 const h = c => c.repeat(40), w = c => c.repeat(32);
 fs.writeFileSync(process.env.DATA_FILE, [
@@ -18,6 +18,16 @@ assert.deepEqual(prefix('zebra ').map(r => r.n), []);
 assert.equal(prefix('zebra')[0].b, 400);
 assert.equal(webUrl(w('b')), 'https://x.test/a?b=1');
 assert.equal(webUrl(h('a')), undefined);
+
+assert(source('Film.2001.1080p.BluRay.REMUX') > source('Film.2001.1080p.BluRay.x264'));
+assert(source('Film.2001.BluRay') > source('Film.2001.WEB-DL') && source('Film.2001.WEB-DL') > source('Film.2001.WEBRip'));
+assert.equal(source('Film.2001.AMZN.WEB.H264'), source('Film.2001.WEB-DL'));
+assert(source('Film.2001.HDTV') > source('Film.2001.CAM'));
+const ranked = [
+  { res: '1080P', q: source('BluRay'), size: 9 }, { res: '2160P', q: source('WEBRip'), size: 1 },
+  { res: '1080P', q: source('WEB-DL'), size: 20 }, { res: '1080P', q: source('BluRay'), size: 12 },
+].sort(byQuality);
+assert.deepEqual(ranked.map(r => [r.res, r.size]), [['2160P', 1], ['1080P', 12], ['1080P', 9], ['1080P', 20]]);
 
 assert.equal(norm('[QxR] Schindler’s List (1993) 1080p'), 'schindlers list 1993 1080p');
 assert.equal(norm('Amélie.2001.BluRay'), 'amelie 2001 bluray');
