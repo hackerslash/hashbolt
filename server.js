@@ -148,33 +148,25 @@ function limiter(n) {
 }
 const checkSlot = limiter(8);
 
-// TorBox's cache is global, so each hash's answer is shared by every user for 10 min, and requests in flight are
-// shared too. Two layers: `present` asks only whether hashes are cached (small responses); `listed` fetches file
-// lists, which are large, and is only asked about hashes already known to be cached.
-const checks = new Map(), lists = new Map();
-function batchInto(map, key, hashes, url) {
-  if (map.size > 50000) map.clear();
+// TorBox's cache is global, so each hash's answer (its video files, or none when uncached) is shared by every user
+// for 10 min, and requests in flight are shared too: episodes of one show check each season pack once.
+const checks = new Map();
+async function cached(key, hashes) {
+  if (checks.size > 50000) checks.clear();
   const now = Date.now();
-  const todo = hashes.filter(h => !(now - map.get(h)?.t < 10 * 60e3));
+  const todo = hashes.filter(h => !(now - checks.get(h)?.t < 10 * 60e3));
   for (const k of ['torrents', 'webdl']) {
     const hs = todo.filter(h => kind(h) === k);
     for (let i = 0; i < hs.length; i += 100) {
       const batch = hs.slice(i, i + 100);
-      const req = checkSlot(() => tb(key, url(k, batch)));
-      for (const h of batch) map.set(h, { t: now, p: req.then(d => d?.[h] || null)
-        .catch(e => { map.delete(h); throw e; }) });
+      const req = checkSlot(() => tb(key, `/${k}/checkcached?format=object&list_files=true&hash=${batch.join(',')}`));
+      for (const h of batch) checks.set(h, { t: now, p: req.then(d => (d?.[h]?.files || []).filter(f => VIDEO.test(f.name)))
+        .catch(e => { checks.delete(h); throw e; }) });
     }
   }
-  return Promise.all(hashes.map(h => map.get(h).p));
+  const files = await Promise.all(hashes.map(h => checks.get(h).p));
+  return Object.fromEntries(hashes.flatMap((h, i) => files[i].length ? [[h, files[i]]] : []));
 }
-const present = (key, hashes) => batchInto(checks, key, hashes,
-  (k, b) => `/${k}/checkcached?format=object&hash=${b.join(',')}`);
-const listed = (key, hashes) => batchInto(lists, key, hashes,
-  (k, b) => `/${k}/checkcached?format=object&list_files=true&hash=${b.join(',')}`)
-  .then(es => Object.fromEntries(hashes.flatMap((h, i) => {
-    const files = (es[i]?.files || []).filter(f => VIDEO.test(f.name));
-    return files.length ? [[h, files]] : [];
-  })));
 
 async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
@@ -186,17 +178,14 @@ async function find(key, type, imdb, s, e) {
   } else {
     cands = cands.filter(r => { const x = r.k.match(/\bs(\d+) ?e(\d+)\b/); return !x || (+x[1] === +s && +x[2] === +e); });
   }
-  // Presence is checked for the 500 biggest candidates; a long-running show's smaller files past that are dropped.
+  // The 500 biggest candidates are checked; a long-running show's smaller files past that are dropped.
   cands = cands.sort((a, b) => b.b - a.b).slice(0, 500);
-  // A shared check may have run on another user's failing key; retry once on our own.
-  const retry = fn => fn().catch(() => fn());
-  const pres = await retry(() => present(key, cands.map(r => r.h)));
-  const hits = cands.filter((r, i) => pres[i]);
-  // One round of file lists for every cached hit (at most 5 parallel calls): fetching only what is still missing,
-  // round after round, cost ~14 sequential calls on shows whose packs often lack the episode.
-  const c = await retry(() => listed(key, hits.map(r => r.h)));
+  // One round: file lists come back only for cached hashes, so a separate "is it cached" pass would only add a
+  // round trip. A shared check may have run on another user's failing key; retry once on our own.
+  const hs = cands.map(r => r.h);
+  const c = await cached(key, hs).catch(() => cached(key, hs));
   const ep = s && epRe(s, e);
-  const playable = hits.flatMap(r => {
+  const playable = cands.flatMap(r => {
     const f = c[r.h] && pick(c[r.h], r.n, ep, y);
     return f ? [{ ...r, file: path.basename(f.name), size: f.size, ...rate(path.basename(f.name), r.n) }] : [];
   }).sort(byQuality);
