@@ -68,7 +68,7 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
     if (url.includes('cinemeta')) return { ok: true, json: async () => ({ meta: { name: 'Amélie', year: 2001 } }) };
     const q = new URL(url).searchParams, hs = q.get('hash').split(',');
     const data = Object.fromEntries(hs.map(h =>
-      [h, q.has('list_files') ? { files: [{ name: 'Amelie.2001.1080p.mkv', size: 1e9 }] } : { size: 1 }]));
+      [h, q.has('list_files') ? { files: [{ name: 'Amelie.2001.mkv', size: 1e9 }] } : { size: 1 }]));
     return { ok: true, json: async () => ({ success: true, data }) };
   };
   const { find } = require('./server');
@@ -87,5 +87,29 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
   const best = await find('k', 'movie', 'tt0119178', '', '');
   assert.equal(best.length, 40);
   assert.equal(best[0].n, 'Amelie.2001.2160p.REMUX');
+
+  // Quotas: 30 at 2160p, 20 at 1080p, 5 at 720p -> 25 + 15, no 720p. Only 5 at 2160p -> the rest goes to 1080p.
+  const mix = async (n4k, n1080, n720, id) => {
+    let i = 0;
+    const row = (res, src) => `amelie 2001 ${res} ${src} ${i}\tAmelie.2001.${res}.${src}.${i}\t${hex(1000 + ++i)}\t${1e9 + i}`;
+    fs.writeFileSync(process.env.DATA_FILE, [
+      ...Array.from({ length: n4k }, () => row('2160p', 'WEBRip')),
+      ...Array.from({ length: n1080 }, (_, j) => row('1080p', j % 2 ? 'BluRay' : 'WEB-DL')),
+      ...Array.from({ length: n720 }, () => row('720p', 'BluRay')),
+    ].sort().join('\n'));
+    load();
+    const got = await find('k', 'movie', id, '', '');
+    return Object.fromEntries(['2160P', '1080P', '720P'].map(r => [r, got.filter(x => x.res === r).length]).concat([['all', got]]));
+  };
+  const a = await mix(30, 20, 5, 'tt0119179');
+  assert.deepEqual([a['2160P'], a['1080P'], a['720P']], [25, 15, 0]);
+  const b = await mix(5, 50, 5, 'tt0119180');
+  assert.deepEqual([b['2160P'], b['1080P'], b['720P']], [5, 35, 0]);
+  const c = await mix(2, 3, 50, 'tt0119181');
+  assert.deepEqual([c['2160P'], c['1080P'], c['720P']], [2, 3, 35]);
+  // order: resolution, then source, then size
+  const order = a.all.map(x => [x.res, x.q, x.size]);
+  assert.deepEqual(order, [...order].sort((x, y) => (y[0] === '2160P') - (x[0] === '2160P') || y[1] - x[1] || y[2] - x[2]));
+  assert(a.all.findIndex(x => x.res === '1080P' && /BluRay/.test(x.n)) < a.all.findIndex(x => x.res === '1080P' && /WEB-DL/.test(x.n)));
   console.log('ok');
 })();

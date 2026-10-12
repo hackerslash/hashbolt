@@ -13,7 +13,9 @@ const INDEX_REPO = process.env.INDEX_REPO;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.tsv');
 const TB = 'https://api.torbox.app/v1/api';
 const VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm|wmv)$/i;
-const MAX_STREAMS = 40;
+// Up to 25 at 2160p and 15 at 1080p so slower connections get smaller files; slots a title can't fill at
+// those resolutions go to the best of the rest, 40 in all.
+const MAX_STREAMS = 40, QUOTA = { '2160P': 25, '1080P': 15 };
 
 const norm = s => s.replace(/^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/, '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -192,15 +194,29 @@ async function find(key, type, imdb, s, e) {
   // Ranked by the release name first, so the streams kept are the best ones rather than the biggest.
   const hits = cands.filter((r, i) => pres[i]).map(r => ({ ...r, res: resolution(r.n), q: source(r.n), size: r.b })).sort(byQuality);
   const ep = s && epRe(s, e);
-  const out = [];
-  // Some hits hold no playable file (a pack without the episode), so windows continue until enough resolve.
-  for (let i = 0; i < hits.length && out.length < MAX_STREAMS;) {
-    const win = hits.slice(i, i + MAX_STREAMS - out.length);
-    i += win.length;
-    const c = await retry(() => listed(key, win.map(r => r.h)));
-    for (const r of win) {
-      const f = c[r.h] && pick(c[r.h], r.n, ep, y);
-      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, ...rate(path.basename(f.name), r.n) });
+  const out = [], count = {}, tried = new Set();
+  // Pass 1 respects QUOTA, pass 2 fills what is left. Each window fetches file lists for the next hits that fit;
+  // a hit without a playable file (a pack missing the episode) just leaves its slot to the next window.
+  for (const capped of [true, false]) {
+    const queue = hits.filter(r => !tried.has(r.h));
+    for (let i = 0; i < queue.length && out.length < MAX_STREAMS;) {
+      const win = [], planned = { ...count };
+      for (; i < queue.length && win.length < MAX_STREAMS - out.length; i++) {
+        const r = queue[i];
+        if (capped && (planned[r.res] || 0) >= (QUOTA[r.res] || 0)) continue;
+        planned[r.res] = (planned[r.res] || 0) + 1;
+        win.push(r);
+      }
+      if (!win.length) break;
+      const c = await retry(() => listed(key, win.map(r => r.h)));
+      for (const r of win) {
+        tried.add(r.h);
+        const f = c[r.h] && pick(c[r.h], r.n, ep, y);
+        if (!f) continue;
+        const st = { ...r, file: path.basename(f.name), size: f.size, ...rate(path.basename(f.name), r.n) };
+        count[st.res] = (count[st.res] || 0) + 1;
+        out.push(st);
+      }
     }
   }
   return out.sort(byQuality);
