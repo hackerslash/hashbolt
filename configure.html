@@ -663,6 +663,15 @@ function copyForNuvio() {
   flash($('nuvio-btn'), ICON_CHECK + 'Copied, paste in Nuvio', 2000);
 }
 
+// Opened from an install (.../<config>/configure): fill in the key and consent it was made with.
+try {
+  const c = JSON.parse(atob(location.pathname.split('/').at(-2).replace(/-/g, '+').replace(/_/g, '/')));
+  if (typeof c.key === 'string') {
+    $('torbox').value = c.key;
+    $('consent').checked = c.contribute === true;
+  }
+} catch {}
+
 fetch(BASE + '/health').then(r => r.json()).then(h => {
   $('stat-entries').textContent = h.entries >= 1e6 ? (h.entries / 1e6).toFixed(2) + 'M' : h.entries >= 1e3 ? Math.round(h.entries / 1e3) + 'K' : h.entries;
 }).catch(() => {});
