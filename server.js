@@ -191,34 +191,25 @@ async function find(key, type, imdb, s, e) {
   // A shared check may have run on another user's failing key; retry once on our own.
   const retry = fn => fn().catch(() => fn());
   const pres = await retry(() => present(key, cands.map(r => r.h)));
-  // Ranked by the release name first, so the streams kept are the best ones rather than the biggest.
-  const hits = cands.filter((r, i) => pres[i]).map(r => ({ ...r, res: resolution(r.n), q: source(r.n), size: r.b })).sort(byQuality);
+  const hits = cands.filter((r, i) => pres[i]);
+  // One round of file lists for every cached hit (at most 5 parallel calls): fetching only what is still missing,
+  // round after round, cost ~14 sequential calls on shows whose packs often lack the episode.
+  const c = await retry(() => listed(key, hits.map(r => r.h)));
   const ep = s && epRe(s, e);
-  const out = [], count = {}, tried = new Set();
-  // Pass 1 respects QUOTA, pass 2 fills what is left. Each window fetches file lists for the next hits that fit;
-  // a hit without a playable file (a pack missing the episode) just leaves its slot to the next window.
-  for (const capped of [true, false]) {
-    const queue = hits.filter(r => !tried.has(r.h));
-    for (let i = 0; i < queue.length && out.length < MAX_STREAMS;) {
-      const win = [], planned = { ...count };
-      for (; i < queue.length && win.length < MAX_STREAMS - out.length; i++) {
-        const r = queue[i];
-        if (capped && (planned[r.res] || 0) >= (QUOTA[r.res] || 0)) continue;
-        planned[r.res] = (planned[r.res] || 0) + 1;
-        win.push(r);
-      }
-      if (!win.length) break;
-      const c = await retry(() => listed(key, win.map(r => r.h)));
-      for (const r of win) {
-        tried.add(r.h);
-        const f = c[r.h] && pick(c[r.h], r.n, ep, y);
-        if (!f) continue;
-        const st = { ...r, file: path.basename(f.name), size: f.size, ...rate(path.basename(f.name), r.n) };
-        count[st.res] = (count[st.res] || 0) + 1;
-        out.push(st);
-      }
+  const playable = hits.flatMap(r => {
+    const f = c[r.h] && pick(c[r.h], r.n, ep, y);
+    return f ? [{ ...r, file: path.basename(f.name), size: f.size, ...rate(path.basename(f.name), r.n) }] : [];
+  }).sort(byQuality);
+  // QUOTA per resolution first, then the best of the rest, MAX_STREAMS in all.
+  const out = [], count = {}, taken = new Set();
+  for (const capped of [true, false])
+    for (const st of playable) {
+      if (out.length >= MAX_STREAMS) break;
+      if (taken.has(st) || (capped && (count[st.res] || 0) >= (QUOTA[st.res] || 0))) continue;
+      taken.add(st);
+      count[st.res] = (count[st.res] || 0) + 1;
+      out.push(st);
     }
-  }
   return out.sort(byQuality);
 }
 
