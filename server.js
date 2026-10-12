@@ -185,7 +185,11 @@ async function cached(key, hashes) {
 async function find(key, type, imdb, s, e) {
   const m = await meta(type, imdb);
   const title = norm(m.name);
-  let cands = prefix(title + ' ').map(r => ({ ...r, rest: r.k.slice(title.length), fit: 0 })), y;
+  // Releases are found with and without a leading "the"; the year and season checks below keep strays out.
+  const seen = new Map();
+  for (const t of [title, title.startsWith('the ') ? title.slice(4) : 'the ' + title])
+    for (const r of prefix(t + ' ')) if (!seen.has(r.h)) seen.set(r.h, { ...r, rest: r.k.slice(t.length), fit: 0 });
+  let cands = [...seen.values()], y;
   if (type === 'movie') {
     y = +String(m.year || m.releaseInfo || '').slice(0, 4);
     if (y) cands = cands.filter(r => { const yr = r.rest.match(/\b(19|20)\d\d\b/); return yr && Math.abs(yr[0] - y) <= 1; });
