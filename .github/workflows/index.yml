@@ -2,8 +2,9 @@ name: Build index
 
 on:
   schedule:
-    # off :00/:30, where GitHub delays or drops scheduled runs under load
-    - cron: '7,37 * * * *'
+    # Backup only: GitHub's cron is best-effort and skips most slots, so the deployment starts a run every
+    # 30 minutes through workflow_dispatch (homelab: host/hashbolt-index.crontab).
+    - cron: '17 */6 * * *'
   workflow_dispatch:
 
 permissions:
