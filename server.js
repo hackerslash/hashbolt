@@ -23,6 +23,10 @@ const biggest = a => a.sort((x, y) => y.size - x.size)[0];
 const RES = { '2160P': 4, '1080P': 3, '720P': 2, '480P': 1 };
 const SOURCES = [/remux/i, /blu-?ray|bdrip|brrip/i, /web[ .-]?dl|\bweb\b/i, /webrip/i, /hdtv/i];
 const source = name => { const i = SOURCES.findIndex(q => q.test(name)); return i < 0 ? 0 : SOURCES.length - i; };
+const resolution = text => {
+  const r = (text.match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
+  return r === '4K' ? '2160P' : r;
+};
 const byQuality = (a, b) => (RES[b.res] || 0) - (RES[a.res] || 0) || b.q - a.q || b.size - a.size;
 // Episode: the file matching SxxEyy (or the only video of a single-episode torrent). Movie: the biggest video,
 // preferring files with the release year so a multi-movie pack yields the right film.
@@ -179,28 +183,23 @@ async function find(key, type, imdb, s, e) {
   } else {
     cands = cands.filter(r => { const x = r.k.match(/\bs(\d+) ?e(\d+)\b/); return !x || (+x[1] === +s && +x[2] === +e); });
   }
-  // Biggest first: presence (small responses, no file lists) for all chunks runs concurrently,
-  // then file lists are fetched only for the first ~20 cached hashes, in chunk order. A popular
-  // title answers with ~5 small calls + 1 file-list call instead of ~5 full file-list calls.
-  // ponytail: page through TorBox if long-running shows lose results past the 500 cap
-  // ponytail: cap at 500 biggest candidates, page through TorBox if long-running shows lose results
+  // Presence is checked for the 500 biggest candidates; a long-running show's smaller files past that are dropped.
   cands = cands.sort((a, b) => b.b - a.b).slice(0, 500);
   // A shared check may have run on another user's failing key; retry once on our own.
   const retry = fn => fn().catch(() => fn());
   const pres = await retry(() => present(key, cands.map(r => r.h)));
-  const hits = cands.filter((r, i) => pres[i]);
-  // File lists go biggest-first, a window at a time, until MAX_STREAMS resolve. A hit can still fail to resolve
-  // (a season pack without the episode), so the next window picks up where this one stopped.
+  // Ranked by the release name first, so the streams kept are the best ones rather than the biggest.
+  const hits = cands.filter((r, i) => pres[i]).map(r => ({ ...r, res: resolution(r.n), q: source(r.n), size: r.b })).sort(byQuality);
   const ep = s && epRe(s, e);
   const out = [];
+  // Some hits hold no playable file (a pack without the episode), so windows continue until enough resolve.
   for (let i = 0; i < hits.length && out.length < MAX_STREAMS;) {
     const win = hits.slice(i, i + MAX_STREAMS - out.length);
     i += win.length;
     const c = await retry(() => listed(key, win.map(r => r.h)));
     for (const r of win) {
       const f = c[r.h] && pick(c[r.h], r.n, ep, y);
-      const res = ((r.n + ' ' + f?.name).match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
-      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: res === '4K' ? '2160P' : res, q: source(r.n + ' ' + f.name) });
+      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: resolution(r.n + ' ' + f.name), q: source(r.n + ' ' + f.name) });
     }
   }
   return out.sort(byQuality);

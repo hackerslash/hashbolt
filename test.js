@@ -74,5 +74,16 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
   assert.equal(out.length, 2);
   assert(out.every(r => r.file && r.size && r.res));
   assert(out[0].size >= out[1].size);
+
+  // 44 big 720p WEBRips and one small 2160p REMUX: ranking before the 40-stream cut must keep the REMUX, first.
+  const hex = i => i.toString(16).padStart(40, '0');
+  fs.writeFileSync(process.env.DATA_FILE, [
+    `amelie 2001 2160p remux\tAmelie.2001.2160p.REMUX\t${hex(999)}\t1`,
+    ...Array.from({ length: 44 }, (_, i) => `amelie 2001 720p webrip ${i}\tAmelie.2001.720p.WEBRip.${i}\t${hex(i + 1)}\t${1e10 + i}`),
+  ].sort().join('\n'));
+  load();
+  const best = await find('k', 'movie', 'tt0119178', '', '');
+  assert.equal(best.length, 40);
+  assert.equal(best[0].n, 'Amelie.2001.2160p.REMUX');
   console.log('ok');
 })();
