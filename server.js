@@ -37,9 +37,9 @@ const pick = (files, name, ep, year) => {
   return biggest(dated.length ? dated : v);
 };
 
-// data.tsv lines are "normkey \t name \t hash \t bytes [\t url]", pre-sorted by build.js. '\t' sorts below
-// every key char, so line order equals key order and title lookup is a binary-searched prefix scan.
-// The file stays one Buffer with line offsets (a quarter of the memory of 1.4M strings); lines decode on demand.
+// data.tsv lines are "normkey \t name \t hash \t bytes [\t url]", sorted by build.js. '\t' sorts below every key
+// character, so line order is key order and a title lookup is a binary-searched prefix scan. The file is kept as one
+// Buffer plus line offsets, a quarter of the memory of 1.4M strings.
 let db = { buf: Buffer.alloc(0), offs: new Uint32Array([0]) }, urls = new Map();
 const kind = h => h.length === 40 ? 'torrents' : 'webdl';
 const count = () => db.offs.length - 1;
@@ -76,9 +76,8 @@ function prefix(p) {
   return out;
 }
 
-// The index is built by GitHub Actions and published as the `data.tsv.gz` asset of release `index` on INDEX_REPO.
-// Polling costs one API call; the asset is only downloaded when it changed.
-// The loaded release version is saved beside the data so a restart doesn't re-download an unchanged index.
+// GitHub Actions publishes the index as `data.tsv.gz` on INDEX_REPO's `index` release. A poll is one API call;
+// the asset is downloaded only when its version changed, and the version is saved so restarts skip it too.
 let busy = false, version = null;
 try { version = fs.readFileSync(DATA + '.version', 'utf8'); } catch {}
 async function refresh() {
@@ -102,7 +101,7 @@ async function refresh() {
   busy = false;
 }
 
-// ponytail: cap-and-clear caches, swap for an LRU if hit rates matter
+// Caches are cleared wholesale when full: no LRU bookkeeping, and enough at this scale.
 function memo(map, key, ttl, fn) {
   const hit = map.get(key);
   if (hit && Date.now() - hit.t < ttl) return hit.v;
@@ -134,7 +133,7 @@ async function tb(key, p, opts = {}) {
   if (!j.success) throw new Error(`TorBox ${p.split('?')[0]}: ${j.detail || j.error || r.status}`);
   return j.data;
 }
-// ponytail: per-instance limits, move to Redis if instances multiply
+// Concurrency limits are per process.
 function limiter(n) {
   let running = 0;
   const waiting = [];
@@ -216,10 +215,9 @@ async function mylist(key, k, { match, fresh = true } = {}) {
   return match ? undefined : all;
 }
 
-// Opted-in libraries go into the same Redis `hashlib` as MyTorbox, in its entry shape:
-// lowercase hash -> {name, size, files, url (webdl only)}. A webdl hash is md5(original_url), and TorBox claims a
-// cached webdl from that URL even after it expires. Nothing identifying is kept (no key, auth_id or IP), and keys
-// are never stored: a library is read at most every 6h, only while its owner's Stremio is calling us.
+// Consenting libraries are copied into MyTorbox's Redis `hashlib` in its entry shape: lowercase hash ->
+// {name, size, files, url}. `url` (web downloads only) matters because a webdl hash is md5(original_url), and TorBox
+// serves a cached webdl from that URL even after it expires. No key, auth_id or IP is stored.
 let redis;
 const polled = new Map();
 const COPY_EVERY = 6 * 3600;
@@ -313,9 +311,8 @@ function send(res, code, body, type = 'application/json') {
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
 }
 
-// Behind a proxy that mounts us under a path, X-Forwarded-Prefix names it, so every URL we hand out (stream and
-// play links, the logo, the configure page's own calls) carries it. Header values are checked because they end up
-// in that page.
+// Every URL handed out carries the proxy's X-Forwarded-Prefix, if any. Headers are validated since they are
+// written into the configure page.
 function origin(req) {
   const proto = req.headers['x-forwarded-proto']?.split(',')[0].trim() === 'https' ? 'https' : 'http';
   const host = /^[\w.-]+(:\d+)?$/.test(req.headers.host || '') ? req.headers.host : 'localhost';
