@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.DATA_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-')), 'data.tsv');
-const { norm, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality } = require('./server');
+const { norm, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate } = require('./server');
 
 const h = c => c.repeat(40), w = c => c.repeat(32);
 fs.writeFileSync(process.env.DATA_FILE, [
@@ -23,6 +23,8 @@ assert(source('Film.2001.1080p.BluRay.REMUX') > source('Film.2001.1080p.BluRay.x
 assert(source('Film.2001.BluRay') > source('Film.2001.WEB-DL') && source('Film.2001.WEB-DL') > source('Film.2001.WEBRip'));
 assert.equal(source('Film.2001.AMZN.WEB.H264'), source('Film.2001.WEB-DL'));
 assert(source('Film.2001.HDTV') > source('Film.2001.CAM'));
+assert.deepEqual(rate('Show.S01E02.2160p.WEBRip.mkv', 'Show.S01.2160p.WEB-DL'), { res: '2160P', q: source('WEBRip') });
+assert.deepEqual(rate('S01E02 - Pilot.mkv', 'Show.S01.1080p.BluRay'), { res: '1080P', q: source('BluRay') });
 const ranked = [
   { res: '1080P', q: source('BluRay'), size: 9 }, { res: '2160P', q: source('WEBRip'), size: 1 },
   { res: '1080P', q: source('WEB-DL'), size: 20 }, { res: '1080P', q: source('BluRay'), size: 12 },

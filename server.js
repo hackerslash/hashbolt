@@ -27,6 +27,8 @@ const resolution = text => {
   const r = (text.match(/\b(2160p|4k|1080p|720p|480p)\b/i) || ['SD'])[0].toUpperCase();
   return r === '4K' ? '2160P' : r;
 };
+// A file's own tags win over its pack's; the pack fills in what the file name leaves out.
+const rate = (file, pack) => ({ res: resolution(file + ' ' + pack), q: source(file) || source(pack) });
 const byQuality = (a, b) => (RES[b.res] || 0) - (RES[a.res] || 0) || b.q - a.q || b.size - a.size;
 // Episode: the file matching SxxEyy (or the only video of a single-episode torrent). Movie: the biggest video,
 // preferring files with the release year so a multi-movie pack yields the right film.
@@ -198,7 +200,7 @@ async function find(key, type, imdb, s, e) {
     const c = await retry(() => listed(key, win.map(r => r.h)));
     for (const r of win) {
       const f = c[r.h] && pick(c[r.h], r.n, ep, y);
-      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, res: resolution(r.n + ' ' + f.name), q: source(r.n + ' ' + f.name) });
+      if (f) out.push({ ...r, file: path.basename(f.name), size: f.size, ...rate(path.basename(f.name), r.n) });
     }
   }
   return out.sort(byQuality);
@@ -365,4 +367,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality };
+module.exports = { norm, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate };
