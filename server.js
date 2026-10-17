@@ -17,7 +17,8 @@ const VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm|wmv)$/i;
 // those resolutions go to the best of the rest, 40 in all.
 const MAX_STREAMS = 40, QUOTA = { '2160P': 25, '1080P': 15 };
 
-const norm = s => s.replace(/^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/, '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+const SITE = /^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/;
+const norm = s => s.replace(SITE, '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
 // How a release's name (past the title) fits season s, episode e: 0 names it (or a range or complete run holding it),
 // 1 says nothing about seasons, -1 names another season or episode.
@@ -33,6 +34,18 @@ function seasonFit(rest, s, e) {
   if (named.length) return named.includes(s) ? 0 : -1;
   return /\b(complete|collection|integral)\b/.test(rest) ? 0 : 1;
 }
+// A movie release names a year within one of y and no season ("3% (2011) S01"). A short title ("3", "Up") starts
+// many others' names ("3 Day Test 2012", "Up in the Air 2009"), so only the year, an edition tag or a bracketed or
+// dashed subtitle ("RRR (Rise Roar Revolt)", "Up - Altas Aventuras") may follow it.
+function movieFit(r, title, y) {
+  const yr = r.rest.match(/\b(19|20)\d\d\b/);
+  if (!yr || Math.abs(yr[0] - y) > 1 || /\bs\d+ ?e\d+\b|\bseason \d+\b|\bs0\d\b/.test(r.rest)) return false;
+  return title.length > 3 || /^ (?:a ?k ?a .*?|(?:(?:3d|1|extended|unrated|uncut|remastered|imax) )*)(?:19|20)\d\d\b/.test(r.rest)
+    // "3 - Prometheus", "3.[FakeTaxi.com]": a number before " - " or "[" is a list index, not the title.
+    || norm(r.n.replace(SITE, '').split(/^\d+$/.test(title) ? /\(/ : /\s-\s|[([]/)[0]) === title;
+}
+// norm drops non-Latin letters, so "Люди в черном 3.2012" would read as the film "3 2012" ("Аватар Avatar" is fine).
+const foreign = name => /^[^\p{L}\p{N}]*[^\P{L}\p{sc=Latin}][^\p{sc=Latin}\p{N}]*\p{N}/u.test(name.replace(SITE, ''));
 const epRe = (s, e) => new RegExp(`(s0*${+s}[ ._-]*e0*${+e}|\\b0*${+s}x0*${+e})(?!\\d)`, 'i');
 const biggest = a => a.sort((x, y) => y.size - x.size)[0];
 // Streams list by resolution, then source (REMUX > BluRay > WEB-DL > WEBRip > HDTV > other), then size.
@@ -188,11 +201,11 @@ async function find(key, type, imdb, s, e) {
   // Releases are found with and without a leading "the"; the year and season checks below keep strays out.
   const seen = new Map();
   for (const t of [title, title.startsWith('the ') ? title.slice(4) : 'the ' + title])
-    for (const r of prefix(t + ' ')) if (!seen.has(r.h)) seen.set(r.h, { ...r, rest: r.k.slice(t.length), fit: 0 });
+    for (const r of prefix(t + ' ')) if (!seen.has(r.h) && !foreign(r.n)) seen.set(r.h, { ...r, rest: r.k.slice(t.length), fit: 0 });
   let cands = [...seen.values()], y;
   if (type === 'movie') {
     y = +String(m.year || m.releaseInfo || '').slice(0, 4);
-    if (y) cands = cands.filter(r => { const yr = r.rest.match(/\b(19|20)\d\d\b/); return yr && Math.abs(yr[0] - y) <= 1; });
+    if (y) cands = cands.filter(r => movieFit(r, title, y));
   } else {
     cands = cands.map(r => ({ ...r, fit: seasonFit(r.rest, +s, +e) })).filter(r => r.fit >= 0);
   }
@@ -381,4 +394,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, seasonFit, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate };
+module.exports = { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate };

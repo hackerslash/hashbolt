@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.DATA_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-')), 'data.tsv');
-const { norm, seasonFit, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate } = require('./server');
+const { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate } = require('./server');
 
 const h = c => c.repeat(40), w = c => c.repeat(32);
 fs.writeFileSync(process.env.DATA_FILE, [
@@ -35,6 +35,15 @@ assert.equal(norm('[QxR] Schindler’s List (1993) 1080p'), 'schindlers list 199
 assert.equal(norm('Amélie.2001.BluRay'), 'amelie 2001 bluray');
 assert.equal(norm('www.UIndex.org    -    Foo Bar 2026'), 'foo bar 2026');
 assert.equal(norm('Mr.Robot - S01'), 'mr robot s01');
+const mfit = (n, title, y) => movieFit({ n, rest: norm(n).slice(title.length) }, title, y);
+assert(mfit('3 (2012) Tamil 1080p', '3', 2012) && mfit('3 (Three) (2012) Tamil', '3', 2012) && mfit('Up.3D.2009.1080p', 'up', 2009));
+assert(mfit('Up - Altas Aventuras [2009] 1080p', 'up', 2009) && mfit('RRR a.k.a Rise Roar Revolt 2022', 'rrr', 2022));
+assert(!mfit('3 Day Test 2012 1080p', '3', 2012) && !mfit('Up.in.the.Air.2009', 'up', 2009) && !mfit('Up in the Air (2009)', 'up', 2009));
+assert(!mfit('3 - Prometheus (2012) BDRemux', '3', 2012) && !mfit('3.[FakeTaxi.com] =2012-10-01', '3', 2012));
+assert(!mfit('3% (2011) Season 1 S01 1080p', '3', 2012) && mfit('Up (2009) [2160p x265 10bit S86 Joy]', 'up', 2009));
+assert(mfit('Blade Runner Final Cut 1982 1080p', 'blade runner', 1982) && !mfit('Blade Runner 2049 (2017)', 'blade runner', 1982));
+assert(foreign('Люди в черном 3.2012.UHD') && foreign('www.Site.org - Трансформеры 3 2011') && !foreign('[QxR] 3 (2012)'));
+assert(!foreign('Amélie 2001') && !foreign('阿凡达.Avatar.2009') && !foreign('Аватар_Avatar_2009'));
 const fit = (name, s, e) => seasonFit(' ' + norm(name), s, e);
 assert.equal(fit('S01E02 1080p', 1, 2), 0);
 assert.equal(fit('S01E03 1080p', 1, 2), -1);
