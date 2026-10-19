@@ -296,14 +296,16 @@ function config(seg) {
   return /^[\w-]+$/.test(seg) ? { key: seg } : null;
 }
 
-// The beta portal (BETA_URL) gets one event per stream request and play. A disabled or unknown account gets no
-// streams; the portal being down takes nothing away.
+// The beta portal (BETA_URL) gets one event per stream request and play. A revoked or unknown account gets no
+// streams and no plays; the portal being down takes nothing away. Stream lists see a revoke within 30 s, plays
+// check fresh so the lists Stremio already holds stop playing at once.
 const actives = new Map();
-const active = user => !BETA_URL || !user ? Promise.resolve(true)
-  : memo(actives, user, 5 * 60e3, async () => {
-    const r = await get(`${BETA_URL}/check/${user}`, {}, 3000);
-    return !r.ok || (await r.json()).active === true;
-  }).catch(() => true);
+const checkActive = async user => {
+  const r = await get(`${BETA_URL}/check/${user}`, {}, 3000);
+  return !r.ok || (await r.json()).active === true;
+};
+const active = (user, fresh) => !BETA_URL || !user ? Promise.resolve(true)
+  : (fresh ? checkActive(user) : memo(actives, user, 30e3, () => checkActive(user))).catch(() => true);
 // cloudflared puts the viewer's address in Cf-Connecting-Ip; on the LAN, nginx's X-Forwarded-For has it first.
 const clientIp = req => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim()
   || req.socket.remoteAddress;
@@ -405,6 +407,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (route === 'play' && rest.length === 2 && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0])) {
       const h = rest[0].toLowerCase(), ev = { item: h, title: rest[1] };
+      if (!await active(cfg.user, true)) {
+        track(req, cfg.user, 'play', { ...ev, ok: false, detail: 'access revoked' });
+        return send(res, 403, { error: 'access revoked' });
+      }
       const to = await link(key, h, rest[1]).catch(e => { track(req, cfg.user, 'play', { ...ev, ok: false, detail: e.message }); throw e; });
       track(req, cfg.user, 'play', { ...ev, ok: true });
       res.writeHead(302, { Location: to });
