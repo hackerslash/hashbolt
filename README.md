@@ -59,7 +59,7 @@ docker run -d --name hashbolt -p 7001:7001 -v hashbolt:/data --env-file .env has
 Stremio needs HTTPS for remote addons: run it behind a reverse proxy, sending `X-Forwarded-Proto` (and
 `X-Forwarded-Prefix` if it is mounted under a path), or set `BASE_URL`.
 With `BETA_URL` (the homelab beta portal), each stream request and play is reported there with the viewer's IP and
-the install's beta account (`user` in the config, set by `/configure?user=<token>`); a disabled account gets no streams.
+the install's beta account: the `X-Beta-User` header the homelab's nginx sets on a tester's `/hb/u/<token>/` route, else `user` in the config. A revoked account gets no streams and no plays.
 Without `INDEX_REPO` the server serves a local `data.tsv`, built with `npm run build` (`HASHLISTS_DIR` = a hashlists clone).
 
 ## Endpoints

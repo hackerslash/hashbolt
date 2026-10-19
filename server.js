@@ -393,6 +393,10 @@ const server = http.createServer(async (req, res) => {
     const cfg = config(seg);
     if (!cfg) return send(res, 400, { error: 'bad config' });
     const { key } = cfg;
+    // On a tester's /hb/u/<token>/ link nginx names the account, checked by the portal before it got here; it wins
+    // over whatever the install config claims.
+    const beta = req.headers['x-beta-user'];
+    if (/^[\w-]{8,64}$/.test(beta || '')) cfg.user = beta;
     if (route === 'manifest.json') return send(res, 200, { ...withLogo, behaviorHints: { configurable: true } });
     if (route === 'stream' && rest.length === 2 && ['movie', 'series'].includes(rest[0])) {
       if (!await active(cfg.user)) return send(res, 200, { streams: [], cacheMaxAge: 60 });
