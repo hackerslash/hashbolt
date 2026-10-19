@@ -300,8 +300,10 @@ function config(seg) {
 // streams; the portal being down takes nothing away.
 const actives = new Map();
 const active = user => !BETA_URL || !user ? Promise.resolve(true)
-  : memo(actives, user, 5 * 60e3, async () => (await (await get(`${BETA_URL}/check/${user}`, {}, 3000)).json()).active === true)
-    .catch(() => true);
+  : memo(actives, user, 5 * 60e3, async () => {
+    const r = await get(`${BETA_URL}/check/${user}`, {}, 3000);
+    return !r.ok || (await r.json()).active === true;
+  }).catch(() => true);
 // cloudflared puts the viewer's address in Cf-Connecting-Ip; on the LAN, nginx's X-Forwarded-For has it first.
 const clientIp = req => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim()
   || req.socket.remoteAddress;
@@ -391,13 +393,14 @@ const server = http.createServer(async (req, res) => {
     const { key } = cfg;
     if (route === 'manifest.json') return send(res, 200, { ...withLogo, behaviorHints: { configurable: true } });
     if (route === 'stream' && rest.length === 2 && ['movie', 'series'].includes(rest[0])) {
-      if (!await active(cfg.user)) return send(res, 200, { streams: [] });
+      if (!await active(cfg.user)) return send(res, 200, { streams: [], cacheMaxAge: 60 });
       if (cfg.contribute === true) contribute(key);
       const id = rest[1].replace(/\.json$/, ''), t0 = Date.now();
       let error;
       const list = await streams(key, seg, rest[0], id, base).catch(e => (console.error(e.message), error = e.message, []));
-      const title = await meta(rest[0], id.split(':')[0]).then(m => m.name, () => undefined);
-      track(req, cfg.user, 'stream', { item: id, title, ok: list.length > 0, n: list.length, ms: Date.now() - t0, detail: error });
+      // not awaited: with Cinemeta down, a second lookup would double the time this answer already took
+      const ev = { item: id, ok: list.length > 0, n: list.length, ms: Date.now() - t0, detail: error };
+      meta(rest[0], id.split(':')[0]).then(m => m.name, () => undefined).then(title => track(req, cfg.user, 'stream', { ...ev, title }));
       return send(res, 200, { streams: list, cacheMaxAge: 600 });
     }
     if (route === 'play' && rest.length === 2 && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0])) {
