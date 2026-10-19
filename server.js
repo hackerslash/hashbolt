@@ -9,6 +9,7 @@ try { process.loadEnvFile(path.join(__dirname, '.env')); } catch {}
 
 const PORT = process.env.PORT || 7001;
 const BASE_URL = process.env.BASE_URL?.replace(/\/$/, '');
+const BETA_URL = process.env.BETA_URL?.replace(/\/$/, '');
 const INDEX_REPO = process.env.INDEX_REPO;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.tsv');
 const TB = 'https://api.torbox.app/v1/api';
@@ -285,10 +286,29 @@ async function copy(key) {
   }
 }
 
-// Install URL segment: base64url JSON {key, contribute}. A bare key (pre-consent installs) never contributes.
+// Install URL segment: base64url JSON {key, contribute, user?}. A bare key (pre-consent installs) never contributes.
+// `user` is a beta-portal account token; without one, requests count as anonymous.
 function config(seg) {
-  try { const c = JSON.parse(Buffer.from(seg, 'base64url').toString()); if (/^[\w-]+$/.test(c?.key)) return c; } catch {}
+  try {
+    const c = JSON.parse(Buffer.from(seg, 'base64url').toString());
+    if (/^[\w-]+$/.test(c?.key)) { if (!/^[\w-]{8,64}$/.test(c.user)) delete c.user; return c; }
+  } catch {}
   return /^[\w-]+$/.test(seg) ? { key: seg } : null;
+}
+
+// The beta portal (BETA_URL) gets one event per stream request and play. A disabled or unknown account gets no
+// streams; the portal being down takes nothing away.
+const actives = new Map();
+const active = user => !BETA_URL || !user ? Promise.resolve(true)
+  : memo(actives, user, 5 * 60e3, async () => (await (await get(`${BETA_URL}/check/${user}`, {}, 3000)).json()).active === true)
+    .catch(() => true);
+// cloudflared puts the viewer's address in Cf-Connecting-Ip; on the LAN, nginx's X-Forwarded-For has it first.
+const clientIp = req => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim()
+  || req.socket.remoteAddress;
+function track(req, user, kind, ev) {
+  if (!BETA_URL) return;
+  fetch(BETA_URL + '/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({ user, addon: 'hashbolt', kind, ip: clientIp(req), ...ev }) }).catch(e => console.error('beta event:', e.message));
 }
 
 async function streams(key, seg, type, id, base) {
@@ -371,12 +391,20 @@ const server = http.createServer(async (req, res) => {
     const { key } = cfg;
     if (route === 'manifest.json') return send(res, 200, { ...withLogo, behaviorHints: { configurable: true } });
     if (route === 'stream' && rest.length === 2 && ['movie', 'series'].includes(rest[0])) {
+      if (!await active(cfg.user)) return send(res, 200, { streams: [] });
       if (cfg.contribute === true) contribute(key);
-      const list = await streams(key, seg, rest[0], rest[1].replace(/\.json$/, ''), base).catch(e => (console.error(e.message), []));
+      const id = rest[1].replace(/\.json$/, ''), t0 = Date.now();
+      let error;
+      const list = await streams(key, seg, rest[0], id, base).catch(e => (console.error(e.message), error = e.message, []));
+      const title = await meta(rest[0], id.split(':')[0]).then(m => m.name, () => undefined);
+      track(req, cfg.user, 'stream', { item: id, title, ok: list.length > 0, n: list.length, ms: Date.now() - t0, detail: error });
       return send(res, 200, { streams: list, cacheMaxAge: 600 });
     }
     if (route === 'play' && rest.length === 2 && /^([a-f0-9]{40}|[a-f0-9]{32})$/i.test(rest[0])) {
-      res.writeHead(302, { Location: await link(key, rest[0].toLowerCase(), rest[1]) });
+      const h = rest[0].toLowerCase(), ev = { item: h, title: rest[1] };
+      const to = await link(key, h, rest[1]).catch(e => { track(req, cfg.user, 'play', { ...ev, ok: false, detail: e.message }); throw e; });
+      track(req, cfg.user, 'play', { ...ev, ok: true });
+      res.writeHead(302, { Location: to });
       return res.end();
     }
     send(res, 404, { error: 'not found' });

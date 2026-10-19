@@ -72,6 +72,10 @@ const seg = Buffer.from(JSON.stringify({ key: 'ab-12', contribute: true })).toSt
 assert.deepEqual(config(seg), { key: 'ab-12', contribute: true });
 assert.deepEqual(config('8976-5a24-4230'), { key: '8976-5a24-4230' });
 assert.equal(config('bad key!'), null);
+const withUser = u => config(Buffer.from(JSON.stringify({ key: 'k', user: u })).toString('base64url')).user;
+assert.equal(withUser('abcdEFGH_123-xyz'), 'abcdEFGH_123-xyz');
+assert.equal(withUser('../x'), undefined);
+assert.equal(withUser('short'), undefined);
 assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contribute, undefined);
 (async () => {
   const slot = limiter(3);

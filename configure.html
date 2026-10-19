@@ -637,8 +637,11 @@ function toBase64Url(obj) {
   return btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(obj)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// A beta-portal account, from the portal's ?user= link or the install being reconfigured.
+let USER = new URLSearchParams(location.search).get('user');
+
 function showLink(key) {
-  const path = '/' + toBase64Url({ key, contribute: true }) + '/manifest.json';
+  const path = '/' + toBase64Url({ key, contribute: true, ...(USER && { user: USER }) }) + '/manifest.json';
   $('result-url').value = BASE + path;
   $('stremio-link').href = BASE.replace(/^https?:\/\//, 'stremio://') + path;
   $('result').style.display = 'block';
@@ -669,6 +672,7 @@ try {
   if (typeof c.key === 'string') {
     $('torbox').value = c.key;
     $('consent').checked = c.contribute === true;
+    USER ||= c.user;
   }
 } catch {}
 
