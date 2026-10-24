@@ -193,6 +193,17 @@ const meta = (type, id) => memo(metas, id, 24 * 3600e3, async () => {
   }
 });
 
+// TMDB's titles too, through the keyless mirror the Vidy player reads: Cinemeta and release names can spell one title
+// differently ("Thanneermathan Dinangal" vs "Thanneer Mathan Dinangal"). Best effort: none when it doesn't answer.
+const TMDB = 'https://db.wecollege.net/3';
+const tmdbs = new Map();
+const tmdbTitles = (type, id) => memo(tmdbs, id, 24 * 3600e3, async () => {
+  const r = await get(`${TMDB}/find/${id}?external_source=imdb_id`, {}, 5000);
+  if (!r.ok) throw new Error('TMDB HTTP ' + r.status);
+  const d = await r.json(), m = (type === 'movie' ? d.movie_results : d.tv_results)?.[0] || {};
+  return [m.title || m.name, m.original_title || m.original_name].filter(Boolean);
+}).catch(() => []);
+
 async function tb(key, p, opts = {}) {
   const r = await get(TB + p, { ...opts, headers: { Authorization: 'Bearer ' + key } });
   const j = await r.json().catch(() => ({}));
@@ -226,21 +237,24 @@ async function cached(key, hashes) {
         .catch(e => { checks.delete(h); throw e; }) });
     }
   }
-  const files = await Promise.all(hashes.map(h => checks.get(h).p));
+  // Free plans can check torrents but not web downloads; that refusal mustn't drop the cached torrents.
+  const files = await Promise.all(hashes.map(h => kind(h) === 'webdl' ? checks.get(h).p.catch(() => []) : checks.get(h).p));
   return Object.fromEntries(hashes.flatMap((h, i) => files[i].length ? [[h, files[i]]] : []));
 }
 
 async function find(key, type, imdb, s, e) {
-  const m = await meta(type, imdb);
-  const title = norm(m.name);
-  // Releases are found with and without a leading "the"; the year and season checks below keep strays out.
+  const [m, others] = await Promise.all([meta(type, imdb), tmdbTitles(type, imdb)]);
+  // Each spelling, with and without a leading "the"; the year and season checks below keep strays out. A title in a
+  // script norm drops ("തണ്ണീർ മത്തൻ ദിനങ്ങൾ") normalises to nothing and is skipped.
+  const titles = [...new Set([m.name, ...others].map(norm).filter(Boolean))];
   const seen = new Map();
-  for (const t of [title, title.startsWith('the ') ? title.slice(4) : 'the ' + title])
-    for (const r of prefix(t + ' ')) if (!seen.has(r.h) && !foreign(r.n)) seen.set(r.h, { ...r, rest: r.k.slice(t.length), fit: 0 });
+  for (const title of titles)
+    for (const t of [title, title.startsWith('the ') ? title.slice(4) : 'the ' + title])
+      for (const r of prefix(t + ' ')) if (!seen.has(r.h) && !foreign(r.n)) seen.set(r.h, { ...r, rest: r.k.slice(t.length), fit: 0, title });
   let cands = [...seen.values()], y;
   if (type === 'movie') {
     y = +String(m.year || m.releaseInfo || '').slice(0, 4);
-    if (y) cands = cands.filter(r => movieFit(r, title, y));
+    if (y) cands = cands.filter(r => movieFit(r, r.title, y));
   } else {
     cands = cands.map(r => ({ ...r, fit: seasonFit(r.rest, +s, +e) })).filter(r => r.fit >= 0);
   }

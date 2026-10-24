@@ -104,6 +104,16 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
   assert(out.every(r => r.file && r.size && r.res));
   assert(out[0].size >= out[1].size);
 
+  // a key whose plan refuses /webdl/checkcached still gets its cached torrents
+  const plain = globalThis.fetch;
+  globalThis.fetch = async url => String(url).includes('/webdl/')
+    ? { ok: false, status: 403, json: async () => ({ success: false, detail: 'API feature not available on your plan.' }) }
+    : plain(url);
+  fs.writeFileSync(process.env.DATA_FILE, [`amelie 2001\tAmelie.2001.1080p\t${h('e')}\t1`, `amelie 2001 4k\tAmelie.2001.4K\t${w('f')}\t2\thttps://x.test/f`].join('\n'));
+  load();
+  assert.deepEqual((await find('free', 'movie', 'tt0119176', '', '')).map(r => r.h), [h('e')]);
+  globalThis.fetch = plain;
+
   // 44 big 720p WEBRips and one small 2160p REMUX: ranking before the 40-stream cut must keep the REMUX, first.
   const hex = i => i.toString(16).padStart(40, '0');
   fs.writeFileSync(process.env.DATA_FILE, [
@@ -138,6 +148,18 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
   const order = a.all.map(x => [x.res, x.q, x.size]);
   assert.deepEqual(order, [...order].sort((x, y) => (y[0] === '2160P') - (x[0] === '2160P') || y[1] - x[1] || y[2] - x[2]));
   assert(a.all.findIndex(x => x.res === '1080P' && /BluRay/.test(x.n)) < a.all.findIndex(x => x.res === '1080P' && /WEB-DL/.test(x.n)));
+  // Cinemeta spells it as one word, the releases as two: TMDB's title finds them; its Malayalam title normalises away
+  fs.writeFileSync(process.env.DATA_FILE, `thanneer mathan dinangal 2019 720p mkv\tThanneer Mathan Dinangal (2019) 720p.mkv\t${h('9')}\t1`);
+  load();
+  globalThis.fetch = async url => {
+    url = String(url);
+    if (url.includes('cinemeta')) return { ok: true, json: async () => ({ meta: { name: 'Thanneermathan Dinangal', year: 2019 } }) };
+    if (url.includes('wecollege')) return { ok: true, json: async () => ({ movie_results: [
+      { title: 'Thanneer Mathan Dinangal', original_title: 'തണ്ണീർ മത്തൻ ദിനങ്ങൾ' }] }) };
+    return plain(url);
+  };
+  assert.deepEqual((await find('k', 'movie', 'tt10551608', '', '')).map(r => r.h), [h('9')]);
+  globalThis.fetch = plain;
   console.log('ok');
 })();
 
