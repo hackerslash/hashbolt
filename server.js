@@ -193,7 +193,7 @@ const meta = (type, id) => memo(metas, id, 24 * 3600e3, async () => {
   }
 });
 
-// TMDB's titles too, through the keyless mirror the Vidy player reads: Cinemeta and release names can spell one title
+// TMDB's titles too, through a keyless TMDB mirror (db.wecollege.net): Cinemeta and release names can spell one title
 // differently ("Thanneermathan Dinangal" vs "Thanneer Mathan Dinangal"). Best effort: none when it doesn't answer.
 const TMDB = 'https://db.wecollege.net/3';
 const tmdbs = new Map();
