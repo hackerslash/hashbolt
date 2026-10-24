@@ -60,6 +60,40 @@ const resolution = text => {
 // A file's own tags win over its pack's; the pack fills in what the file name leaves out.
 const rate = (file, pack) => ({ res: resolution(file + ' ' + pack), q: source(file) || source(pack) });
 const byQuality = (a, b) => (RES[b.res] || 0) - (RES[a.res] || 0) || b.q - a.q || b.size - a.size;
+
+// What a release name states, shown in this order: per group, the first label whose pattern matches. Whole words on
+// the left only: "DDP5.1" and "AAC2.0" run a digit on. Same table as the LinkGenie addon's engine.facts.
+const word = p => new RegExp(`(?<![a-z0-9])(?:${p})(?![a-z])`);
+const FACTS = {
+  video: [[['Remux', 'remux']],
+    [['BluRay', 'blu[ .-]?ray|bdrip|brrip|bd'], ['WEB-DL', 'web[ .-]?dl'], ['WEBRip', 'web[ .-]?rip'], ['HDRip', 'hdrip'],
+      ['HDTV', 'hdtv'], ['DVDRip', 'dvd[ .-]?rip'], ['CAM', 'cam|camrip|hdcam|hdts|telesync']],
+    [['HEVC', 'x265|h[ .]?265|hevc'], ['AVC', 'x264|h[ .]?264|avc'], ['AV1', 'av1']],
+    [['DV', 'dv|dovi|dolby[ .]?vision']], [['HDR10+', 'hdr10\\+|hdr10plus'], ['HDR', 'hdr10|hdr']], [['10bit', '10[ .-]?bit']]],
+  audio: [[['TrueHD', 'truehd'], ['DTS-HD MA', 'dts[ .-]?hd[ .-]?ma|dts[ .-]?hdma'], ['DTS:X', 'dts[ .:-]?x'], ['DTS', 'dts'],
+    ['DD+', 'ddpa?|dd\\+|e[ .-]?ac[ .-]?3'], ['DD', 'dd|ac3'], ['AAC', 'aac'], ['FLAC', 'flac'], ['Opus', 'opus']],
+    [['Atmos', 'atmos']]],
+};
+const LANGS = ['Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Marathi', 'Punjabi', 'Gujarati',
+  'Urdu', 'Japanese', 'Korean', 'Chinese', 'Spanish', 'French', 'German', 'Italian', 'Russian', 'Multi', 'Dual'];
+function facts(file, name = '') {
+  const n = `${file} ${name}`.toLowerCase().replace(/_/g, ' ');
+  const pick1 = groups => groups.map(g => g.find(([, p]) => word(p).test(n))?.[0]).filter(Boolean);
+  const audio = pick1(FACTS.audio);
+  const ch = [...n.matchAll(/(?<![0-9])([257])[ .]([01])(?![0-9])/g)].map(m => `${m[1]}.${m[2]}`).sort().pop();
+  if (ch) audio.push(ch);  // several tracks: the most channels
+  const langs = LANGS.filter(l => word(l.toLowerCase()).test(n)).sort((a, b) => n.indexOf(a.toLowerCase()) - n.indexOf(b.toLowerCase()));
+  const box = file.match(/\.(mkv|mp4|avi|m2ts|webm)$/i);
+  return [[...(box ? [box[1].toUpperCase()] : []), ...pick1(FACTS.video)], [...audio, ...langs]];
+}
+const gb = n => n >= 2 ** 30 ? `${(n / 2 ** 30).toFixed(2)} GB` : `${Math.round(n / 2 ** 20)} MB`;
+// One fact per line, as the LinkGenie addon writes them; a pack's own name only when the file is one of its episodes.
+function describe(r, ep) {
+  const [video, audio] = facts(r.file, r.n), res = r.res === 'SD' ? [] : [r.res.toLowerCase()];
+  return [['📄', r.file], ['📦', ep && r.n !== r.file ? r.n : ''], ['🎞️', [...res, ...video].join(' • ')],
+    ['🔊', audio.join(' • ')], ['💾', r.size ? gb(r.size) : ''], ['📡', r.h.length === 40 ? 'TorBox cached' : 'TorBox web download']]
+    .filter(([, t]) => t).map(([m, t]) => `${m} ${t}`).join('\n');
+}
 // Episode: the file matching SxxEyy (or the only video of a single-episode torrent). Movie: the biggest video,
 // preferring files with the release year so a multi-movie pack yields the right film.
 const pick = (files, name, ep, year) => {
@@ -320,8 +354,8 @@ async function streams(key, seg, type, id, base) {
   const ep = type === 'series';
   if (!/^tt\d+$/.test(imdb) || (ep && !(/^\d+$/.test(s) && /^\d+$/.test(e)))) return [];
   return (await find(key, type, imdb, ep ? s : '', ep ? e : '')).map(r => ({
-    name: (r.h.length === 40 ? 'Hashbolt ⚡\n' : 'Hashbolt 🌐⚡\n') + r.res,
-    description: `${ep ? r.file : r.n}\n💾 ${(r.size / 1e9).toFixed(2)} GB`,
+    name: (r.h.length === 40 ? 'Hashbolt ⚡ ' : 'Hashbolt 🌐⚡ ') + (r.res === 'SD' ? 'SD' : r.res.toLowerCase()),
+    description: describe(r, ep),
     url: `${base}/${seg}/play/${r.h}/${encodeURIComponent(r.file)}`,
     behaviorHints: { bingeGroup: 'hashbolt-' + r.res, filename: r.file, videoSize: r.size },
   }));
@@ -435,4 +469,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate };
+module.exports = { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate, facts, describe };

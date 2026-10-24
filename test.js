@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.DATA_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-')), 'data.tsv');
-const { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate } = require('./server');
+const { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl, source, byQuality, rate, facts, describe } = require('./server');
 
 const h = c => c.repeat(40), w = c => c.repeat(32);
 fs.writeFileSync(process.env.DATA_FILE, [
@@ -140,3 +140,11 @@ assert.equal(config(Buffer.from('{"key":"x/../y"}').toString('base64url')).contr
   assert(a.all.findIndex(x => x.res === '1080P' && /BluRay/.test(x.n)) < a.all.findIndex(x => x.res === '1080P' && /WEB-DL/.test(x.n)));
   console.log('ok');
 })();
+
+// the same facts the LinkGenie addon shows, from the file name and its pack's
+assert.deepEqual(facts('Guru.2007.Hindi.1080p.BluRay.REMUX.AVC.DTS-HDMA.5.1-mAck.mkv'),
+  [['MKV', 'Remux', 'BluRay', 'AVC'], ['DTS-HD MA', '5.1', 'Hindi']]);
+assert.deepEqual(facts('S01E02.mkv', 'Show S01 2160p WEB-DL DDP5.1 Atmos DV HDR H.265'),
+  [['MKV', 'WEB-DL', 'HEVC', 'DV', 'HDR'], ['DD+', 'Atmos', '5.1']]);
+assert.equal(describe({ file: 'S01E02.mkv', n: 'Show S01 2160p WEB-DL', res: '2160P', size: 2 ** 31, h: 'a'.repeat(40) }, true),
+  '📄 S01E02.mkv\n📦 Show S01 2160p WEB-DL\n🎞️ 2160p • MKV • WEB-DL\n💾 2.00 GB\n📡 TorBox cached');
