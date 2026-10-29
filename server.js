@@ -358,8 +358,13 @@ const active = (user, fresh) => !BETA_URL || !user ? Promise.resolve(true)
 // Only nginx (the tunnel) names a tester or a viewer's address: the LAN and tailnet port reaches Hashbolt directly,
 // and a client there could otherwise claim any account or IP.
 const lookups = new Map();
-const fromNginx = async req => req.socket.remoteAddress?.replace(/^::ffff:/, '') ===
-  await memo(lookups, 'nginx', 60e3, () => dns.lookup('nginx').then(r => r.address)).catch(() => null);
+const nginxAt = () => memo(lookups, 'nginx', 60e3, () => dns.lookup('nginx').then(r => r.address)).catch(() => null);
+const fromNginx = async req => {
+  const peer = req.socket.remoteAddress?.replace(/^::ffff:/, '');
+  if (peer === await nginxAt()) return true;
+  lookups.delete('nginx');  // a recreated nginx has a new address: look again rather than distrust it for a minute
+  return peer === await nginxAt();
+};
 // cloudflared puts the viewer's address in Cf-Connecting-Ip; on the LAN, nginx's X-Forwarded-For has it first.
 const clientIp = req => (req.viaNginx && (req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim()))
   || req.socket.remoteAddress;
