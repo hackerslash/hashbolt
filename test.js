@@ -170,3 +170,7 @@ assert.deepEqual(facts('S01E02.mkv', 'Show S01 2160p WEB-DL DDP5.1 Atmos DV HDR 
   [['MKV', 'WEB-DL', 'HEVC', 'DV', 'HDR'], ['DD+', 'Atmos', '5.1']]);
 assert.equal(describe({ file: 'S01E02.mkv', n: 'Show S01 2160p WEB-DL', res: '2160P', size: 2 ** 31, h: 'a'.repeat(40) }, true),
   '📄 S01E02.mkv\n📦 Show S01 2160p WEB-DL\n🎞️ 2160p • MKV • WEB-DL\n💾 2.00 GB\n📡 TorBox cached');
+
+// Tester and viewer headers count only from nginx: a client on the LAN port can't claim an account or an IP.
+require('./server').fromNginx({ socket: { remoteAddress: '192.168.0.50' } })
+  .then(trusted => assert.equal(trusted, false));

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
+const dns = require('dns').promises;
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 try { process.loadEnvFile(path.join(__dirname, '.env')); } catch {}
@@ -354,8 +355,13 @@ const checkActive = async user => {
 };
 const active = (user, fresh) => !BETA_URL || !user ? Promise.resolve(true)
   : (fresh ? checkActive(user) : memo(actives, user, 30e3, () => checkActive(user))).catch(() => true);
+// Only nginx (the tunnel) names a tester or a viewer's address: the LAN and tailnet port reaches Hashbolt directly,
+// and a client there could otherwise claim any account or IP.
+const lookups = new Map();
+const fromNginx = async req => req.socket.remoteAddress?.replace(/^::ffff:/, '') ===
+  await memo(lookups, 'nginx', 60e3, () => dns.lookup('nginx').then(r => r.address)).catch(() => null);
 // cloudflared puts the viewer's address in Cf-Connecting-Ip; on the LAN, nginx's X-Forwarded-For has it first.
-const clientIp = req => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim()
+const clientIp = req => (req.viaNginx && (req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim()))
   || req.socket.remoteAddress;
 function track(req, user, kind, ev) {
   if (!BETA_URL) return;
@@ -424,6 +430,7 @@ function origin(req) {
 const server = http.createServer(async (req, res) => {
   const base = BASE_URL || origin(req);
   try {
+    req.viaNginx = await fromNginx(req);
     const url = new URL(req.url, 'http://x');
     const p = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     if (!p.length || p.at(-1) === 'configure') return send(res, 200, CONFIGURE.replaceAll('__BASE__', base), 'text/html');
@@ -443,7 +450,7 @@ const server = http.createServer(async (req, res) => {
     const { key } = cfg;
     // On a tester's /hb/u/<token>/ link nginx names the account, checked by the portal before it got here; it wins
     // over whatever the install config claims.
-    const beta = req.headers['x-beta-user'];
+    const beta = req.viaNginx && req.headers['x-beta-user'];
     if (/^[\w-]{8,64}$/.test(beta || '')) cfg.user = beta;
     if (route === 'manifest.json') return send(res, 200, { ...withLogo, behaviorHints: { configurable: true } });
     if (route === 'stream' && rest.length === 2 && ['movie', 'series'].includes(rest[0])) {
@@ -483,4 +490,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate, facts, describe };
+module.exports = { fromNginx, norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate, facts, describe };
