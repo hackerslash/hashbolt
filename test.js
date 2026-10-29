@@ -174,3 +174,24 @@ assert.equal(describe({ file: 'S01E02.mkv', n: 'Show S01 2160p WEB-DL', res: '21
 // Tester and viewer headers count only from nginx: a client on the LAN port can't claim an account or an IP.
 require('./server').fromNginx({ socket: { remoteAddress: '192.168.0.50' } })
   .then(trusted => assert.equal(trusted, false));
+
+// The published index is sealed: it opens only under its key, and an altered file is rejected.
+(async () => {
+  const { seal, open } = require('./seal');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hashbolt-seal-')), at = f => path.join(dir, f);
+  fs.writeFileSync(at('plain'), 'amelie 2001\tAmélie (2001) 1080p\n'.repeat(1000));
+  process.env.INDEX_KEY = require('crypto').randomBytes(32).toString('base64');
+  await seal(at('plain'), at('sealed'));
+  assert(!fs.readFileSync(at('sealed')).includes('Amélie'));
+  await open(at('sealed'), at('opened'));
+  assert(fs.readFileSync(at('opened')).equals(fs.readFileSync(at('plain'))));
+  const bad = fs.readFileSync(at('sealed'));
+  bad[40] ^= 1;
+  fs.writeFileSync(at('bad'), bad);
+  await assert.rejects(open(at('bad'), at('x')));
+  process.env.INDEX_KEY = require('crypto').randomBytes(32).toString('base64');
+  await assert.rejects(open(at('sealed'), at('x')));
+  process.env.INDEX_KEY = 'short';
+  await assert.rejects(open(at('sealed'), at('x')), /32 bytes/);
+  console.log('seal ok');
+})();

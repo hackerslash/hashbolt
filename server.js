@@ -1,11 +1,11 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
+const { open } = require('./seal');
 try { process.loadEnvFile(path.join(__dirname, '.env')); } catch {}
 
 const PORT = process.env.PORT || 7001;
@@ -143,8 +143,8 @@ function prefix(p) {
   return out;
 }
 
-// GitHub Actions publishes the index as `data.tsv.gz` on INDEX_REPO's `index` release. A poll is one API call;
-// the asset is downloaded only when its version changed, and the version is saved so restarts skip it too.
+// GitHub Actions publishes the index sealed (seal.js) as `data.tsv.gz.enc` on INDEX_REPO's `index` release. A poll is
+// one API call; the asset is downloaded only when its version changed, and the version is saved so restarts skip it.
 let busy = false, version = null;
 try { version = fs.readFileSync(DATA + '.version', 'utf8'); } catch {}
 async function refresh() {
@@ -153,13 +153,15 @@ async function refresh() {
   try {
     const headers = { 'User-Agent': 'hashbolt', ...(process.env.GITHUB_TOKEN && { Authorization: 'Bearer ' + process.env.GITHUB_TOKEN }) };
     const rel = await (await get(`https://api.github.com/repos/${INDEX_REPO}/releases/tags/index`, { headers })).json();
-    const a = rel.assets?.find(x => x.name === 'data.tsv.gz');
+    const a = rel.assets?.find(x => x.name === 'data.tsv.gz.enc');
     if (!a) throw new Error('no index asset: ' + (rel.message || 'missing'));
     if (a.updated_at !== version) {
       const r = await fetch(a.url, { headers: { ...headers, Accept: 'application/octet-stream' }, signal: AbortSignal.timeout(10 * 60e3) });
       if (!r.ok) throw new Error('index download: HTTP ' + r.status);
-      await pipeline(Readable.fromWeb(r.body), zlib.createGunzip(), fs.createWriteStream(DATA + '.tmp'));
+      await pipeline(Readable.fromWeb(r.body), fs.createWriteStream(DATA + '.enc'));
+      await open(DATA + '.enc', DATA + '.tmp');
       fs.renameSync(DATA + '.tmp', DATA);
+      fs.rmSync(DATA + '.enc');
       load();
       version = a.updated_at;
       fs.writeFileSync(DATA + '.version', version);

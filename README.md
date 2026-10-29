@@ -10,16 +10,19 @@ Stremio addon that lists only TorBox-cached streams for movies and series, from 
 ## How it works
 
 ```
-GitHub Actions, every 30 min (dispatched)       Hashbolt server, every 10 min
+GitHub Actions, hourly (dispatched)             Hashbolt server, every 10 min
   blobless clone of hashlists + scan Redis         check release "index" (1 API call)
-  build.js -> sorted data.tsv                      changed? download, gunzip, reload
-  upload data.tsv.gz to release "index"  ───────>
+  build.js -> sorted data.tsv                      changed? download, decrypt, reload
+  seal.js -> data.tsv.gz.enc on release "index" ─>
 ```
 
 - **Build:** each list's decoded contents are cached by git blob sha (`actions/cache`), so a run only fetches and
   decompresses lists that changed.
 - **Schedule:** GitHub's cron is best-effort and skips most slots, so the deployment starts the workflow every
-  30 minutes with `gh workflow run index.yml`; the workflow's own cron is a 6-hourly backup.
+  hour with `gh workflow run index.yml`; the workflow's own cron is a 6-hourly backup.
+- **Encryption:** the release is public and the index holds what consenting users shared, so only a sealed copy is
+  published: gzipped, then AES-256-GCM under `INDEX_KEY` (32 random bytes, base64), which only the workflow (an
+  Actions secret) and the server have. The server rejects a file that fails the GCM tag.
 - **Lookup:** IMDb id -> Cinemeta title -> binary search over the sorted index (kept as one buffer, ~500 MB RSS),
   with and without a leading "the"; movies must match the year, series drop releases naming another season
   -> one round of TorBox cache checks with file lists (at most 5 parallel calls), cached per hash for 10 min and
@@ -41,10 +44,11 @@ is stored. Without `REDIS_URL` on the server, nothing is collected.
 
 ## Setup
 
-1. Add the `REDIS_URL` Actions secret: `gh secret set REDIS_URL`.
-2. Run **Build index** once (Actions → Build index → Run workflow); it then runs every 30 minutes.
-3. Deploy the server with `INDEX_REPO=<owner>/hashbolt`, `REDIS_URL`, and `GITHUB_TOKEN` (read access, needed
-   while the repo is private).
+1. Make a key and add the Actions secrets: `openssl rand -base64 32` is `INDEX_KEY`; `gh secret set INDEX_KEY` and
+   `gh secret set REDIS_URL`.
+2. Run **Build index** once (Actions → Build index → Run workflow), then schedule it (see above).
+3. Deploy the server with `INDEX_REPO=<owner>/hashbolt`, the same `INDEX_KEY`, and `REDIS_URL`. `GITHUB_TOKEN` is
+   optional: it lifts the API rate limit, and is needed only if the repo is private.
 
 ```sh
 cp .env.example .env

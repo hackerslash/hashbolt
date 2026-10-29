@@ -3,7 +3,7 @@ name: Build index
 on:
   schedule:
     # Backup only: GitHub's cron is best-effort and skips most slots, so the deployment starts a run every
-    # 30 minutes through workflow_dispatch (homelab: host/hashbolt-index.crontab).
+    # hour through workflow_dispatch (homelab: host/hashbolt-index.crontab).
     - cron: '17 */6 * * *'
   workflow_dispatch:
 
@@ -47,10 +47,15 @@ jobs:
         env:
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
+      # The release is public and the index holds what consenting users shared: only the sealed file leaves the runner
+      - name: Seal
+        run: node seal.js data.tsv data.tsv.gz.enc
+        env:
+          INDEX_KEY: ${{ secrets.INDEX_KEY }}
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gzip -6 data.tsv
-          gh release view index >/dev/null 2>&1 || gh release create index --title "Index" --notes "Auto-built every 30 minutes."
-          gh release upload index data.tsv.gz --clobber
+          gh release view index >/dev/null 2>&1 || gh release create index --title "Index" --notes "Encrypted (see seal.js), rebuilt hourly."
+          gh release upload index data.tsv.gz.enc --clobber
