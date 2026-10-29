@@ -316,9 +316,11 @@ function contribute(key) {
   redis ||= new (require('ioredis'))(process.env.REDIS_URL, { maxRetriesPerRequest: 3 });
   const claim = 'hashbolt:polled:' + id;
   (async () => {
-    if (await redis.set(claim, '1', 'EX', COPY_EVERY, 'NX') !== 'OK') return;
+    // Redis unreachable: nothing was claimed, so the next stream request tries again.
+    const won = await redis.set(claim, '1', 'EX', COPY_EVERY, 'NX').catch(e => { polled.delete(id); throw e; });
+    if (won !== 'OK') return;
     // A failed copy releases its claim so the next stream request retries instead of waiting 6h.
-    await copySlot(() => copy(key)).catch(async e => { polled.delete(id); await redis.del(claim); throw e; });
+    await copySlot(() => copy(key)).catch(async e => { polled.delete(id); await redis.del(claim).catch(() => {}); throw e; });
   })().catch(e => console.error('contribute failed:', e.message));
 }
 
@@ -327,14 +329,19 @@ async function copy(key) {
   const fresh = new Map();
   for (const k of ['torrents', 'webdl'])
     for (const t of await mylist(key, k, { fresh: false }))
-      // Incomplete items have size -1 and no files and would overwrite a complete entry.
-      if (t.hash && t.files?.length && (k === 'torrents' || t.original_url)) fresh.set(String(t.hash).toLowerCase(), entry(k, t));
+      // Incomplete items have size -1 and no files and would overwrite a complete entry; one still downloading is not
+      // in TorBox's cache, so listing it would only cost every user a failed cache check.
+      if (t.hash && t.files?.length && t.download_finished !== false && (k === 'torrents' || t.original_url))
+        fresh.set(String(t.hash).toLowerCase(), entry(k, t));
   const hs = [...fresh.keys()];
+  let written = 0;
   for (let i = 0; i < hs.length; i += 1000) {
     const chunk = hs.slice(i, i + 1000), old = await redis.hmget('hashlib', ...chunk);
     const changed = chunk.flatMap((h, j) => old[j] === fresh.get(h) ? [] : [h, fresh.get(h)]);
     if (changed.length) await redis.hset('hashlib', ...changed);
+    written += changed.length / 2;
   }
+  console.log(`contributed a library: ${hs.length} items, ${written} new or changed`);
 }
 
 // Install URL segment: base64url JSON {key, contribute, user?}. A bare key (pre-consent installs) never contributes.
