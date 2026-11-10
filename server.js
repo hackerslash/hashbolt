@@ -456,7 +456,7 @@ const server = http.createServer(async (req, res) => {
       const key = url.searchParams.get('key') || '';
       if (!/^[\w-]+$/.test(key)) return send(res, 200, { valid: false, detail: 'Malformed key' });
       const me = await tb(key, '/user/me').catch(() => null);
-      return send(res, 200, me ? { valid: true, detail: `Valid · ${me.email}` } : { valid: false, detail: 'TorBox rejected this key' });
+      return send(res, 200, me ? { valid: true, detail: 'Valid' } : { valid: false, detail: 'TorBox rejected this key' });
     }
     const [seg, route, ...rest] = p;
     const cfg = config(seg);
