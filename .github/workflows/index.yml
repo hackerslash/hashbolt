@@ -47,15 +47,27 @@ jobs:
         env:
           REDIS_URL: ${{ secrets.REDIS_URL }}
 
+      # An unchanged index is not re-uploaded: every upload makes each server download and reload ~200 MB
+      - name: Changed
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum data.tsv | cut -d" " -f1 > data.tsv.sha256
+          gh release download index -p data.tsv.sha256 -O previous.sha256 2>/dev/null || true
+          cmp -s data.tsv.sha256 previous.sha256 && echo "same=true" >> "$GITHUB_OUTPUT" || true
+
       # The release is public and the index holds what consenting users shared: only the sealed file leaves the runner
       - name: Seal
+        if: steps.changed.outputs.same != true
         run: node seal.js data.tsv data.tsv.gz.enc
         env:
           INDEX_KEY: ${{ secrets.INDEX_KEY }}
 
       - name: Publish
+        if: steps.changed.outputs.same != true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view index >/dev/null 2>&1 || gh release create index --title "Index" --notes "Encrypted (see seal.js), rebuilt hourly."
-          gh release upload index data.tsv.gz.enc --clobber
+          gh release upload index data.tsv.gz.enc data.tsv.sha256 --clobber
