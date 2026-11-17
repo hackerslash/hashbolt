@@ -17,10 +17,7 @@ const add = (hash, name, bytes, url) => {
     map.set(Buffer.from(hash, 'latin1').toString('latin1'), [norm(clean(name)), clean(name), hash, bytes || 0, ...(url ? [clean(url)] : [])].join('\t'));
 };
 
-// Lists and their blob shas come from the git tree, so a blobless clone works: decoded lists are cached in
-// OUT.cache/<file>.tsv ("<blob sha>" header, then "hash \t name \t bytes" lines), and only lists whose cache is
-// missing or stale get their contents fetched and decompressed.
-// Caches of deleted lists stay on disk, unused.
+// Decoded lists are cached in OUT.cache keyed by blob sha, so a blobless clone fetches only changed lists.
 const tree = execFileSync('git', ['-C', ROOT, 'ls-tree', '-r', '-z', 'HEAD'], { maxBuffer: 1e8 }).toString().split('\0')
   .map(l => { const [meta, p] = l.split('\t'); return [p, meta.split(' ')[2]]; })
   .filter(([p]) => /^[^/]+\.html$/.test(p) || /^lists\/[^/]+\.txt$/.test(p));

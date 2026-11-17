@@ -15,15 +15,13 @@ const INDEX_REPO = process.env.INDEX_REPO;
 const DATA = process.env.DATA_FILE || path.join(__dirname, 'data.tsv');
 const TB = 'https://api.torbox.app/v1/api';
 const VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm|wmv)$/i;
-// Up to 25 at 2160p and 15 at 1080p so slower connections get smaller files; slots a title can't fill at
-// those resolutions go to the best of the rest, 40 in all.
+// Slots a title can't fill at a quota resolution go to the best of the rest.
 const MAX_STREAMS = 40, QUOTA = { '2160P': 25, '1080P': 15 };
 
 const SITE = /^(\s*\[[^\]]*\]|\s*www\.\S+\s*-)+/;
 const norm = s => s.replace(SITE, '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/['’]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
-// How a release's name (past the title) fits season s, episode e: 0 names it (or a range or complete run holding it),
-// 1 says nothing about seasons, -1 names another season or episode.
+// 0: names s/e (or a range or complete run holding it), 1: names no season, -1: names another.
 function seasonFit(rest, s, e) {
   const ep = rest.match(/\bs(\d+) ?e(\d+)(?: (?:s\d+ ?)?e(\d+))?\b/);
   if (ep) return +ep[1] === s && e >= +ep[2] && e <= +(ep[3] || ep[2]) ? 0 : -1;
@@ -36,9 +34,7 @@ function seasonFit(rest, s, e) {
   if (named.length) return named.includes(s) ? 0 : -1;
   return /\b(complete|collection|integral)\b/.test(rest) ? 0 : 1;
 }
-// A movie release names a year within one of y and no season ("3% (2011) S01"). A short title ("3", "Up") starts
-// many others' names ("3 Day Test 2012", "Up in the Air 2009"), so only the year, an edition tag or a bracketed or
-// dashed subtitle ("RRR (Rise Roar Revolt)", "Up - Altas Aventuras") may follow it.
+// A short title ("3", "Up") prefixes other films, so only a year, edition tag or bracketed/dashed subtitle may follow it.
 function movieFit(r, title, y) {
   const yr = r.rest.match(/\b(19|20)\d\d\b/);
   if (!yr || Math.abs(yr[0] - y) > 1 || /\bs\d+ ?e\d+\b|\bseason \d+\b|\bs0\d\b/.test(r.rest)) return false;
@@ -62,8 +58,7 @@ const resolution = text => {
 const rate = (file, pack) => ({ res: resolution(file + ' ' + pack), q: source(file) || source(pack) });
 const byQuality = (a, b) => (RES[b.res] || 0) - (RES[a.res] || 0) || b.q - a.q || b.size - a.size;
 
-// What a release name states, shown in this order: per group, the first label whose pattern matches. Whole words on
-// the left only: "DDP5.1" and "AAC2.0" run a digit on. Same table as the LinkGenie addon's engine.facts.
+// First match per group; right edge allows digits ("DDP5.1"). Same table as the LinkGenie addon's engine.facts.
 const word = p => new RegExp(`(?<![a-z0-9])(?:${p})(?![a-z])`);
 const FACTS = {
   video: [[['Remux', 'remux']],
@@ -95,8 +90,7 @@ function describe(r, ep) {
     ['🔊', audio.join(' • ')], ['💾', r.size ? gb(r.size) : ''], ['📡', r.h.length === 40 ? 'TorBox cached' : 'TorBox web download']]
     .filter(([, t]) => t).map(([m, t]) => `${m} ${t}`).join('\n');
 }
-// Episode: the file matching SxxEyy (or the only video of a single-episode torrent). Movie: the biggest video,
-// preferring files with the release year so a multi-movie pack yields the right film.
+// Movie: biggest video, preferring ones named with the year so a multi-movie pack yields the right film.
 const pick = (files, name, ep, year) => {
   const v = files.filter(f => VIDEO.test(f.name));
   if (ep) return biggest(v.filter(f => ep.test(f.name))) || (ep.test(name) ? biggest(v) : undefined);
@@ -104,9 +98,7 @@ const pick = (files, name, ep, year) => {
   return biggest(dated.length ? dated : v);
 };
 
-// data.tsv lines are "normkey \t name \t hash \t bytes [\t url]", sorted by build.js. '\t' sorts below every key
-// character, so line order is key order and a title lookup is a binary-searched prefix scan. The file is kept as one
-// Buffer plus line offsets, a quarter of the memory of 1.4M strings.
+// data.tsv is sorted by key ('\t' sorts below key chars) and held as one Buffer + line offsets for binary search.
 let db = { buf: Buffer.alloc(0), offs: new Uint32Array([0]) }, urls = new Map();
 const kind = h => h.length === 40 ? 'torrents' : 'webdl';
 const count = () => db.offs.length - 1;
@@ -143,8 +135,7 @@ function prefix(p) {
   return out;
 }
 
-// GitHub Actions publishes the index sealed (seal.js) as `data.tsv.gz.enc` on INDEX_REPO's `index` release. A poll is
-// one API call; the asset is downloaded only when its version changed, and the version is saved so restarts skip it.
+// The asset is downloaded only when its updated_at changed; the version is saved so restarts skip it.
 let busy = false, version = null;
 try { version = fs.readFileSync(DATA + '.version', 'utf8'); } catch {}
 async function refresh() {
@@ -196,8 +187,7 @@ const meta = (type, id) => memo(metas, id, 24 * 3600e3, async () => {
   }
 });
 
-// TMDB's titles too, through a keyless TMDB mirror (db.wecollege.net): Cinemeta and release names can spell one title
-// differently ("Thanneermathan Dinangal" vs "Thanneer Mathan Dinangal"). Best effort: none when it doesn't answer.
+// TMDB titles (keyless mirror) catch spellings Cinemeta differs on; best effort.
 const TMDB = 'https://db.wecollege.net/3';
 const tmdbs = new Map();
 const tmdbTitles = (type, id) => memo(tmdbs, id, 24 * 3600e3, async () => {
@@ -224,8 +214,7 @@ function limiter(n) {
 }
 const checkSlot = limiter(8);
 
-// TorBox's cache is global, so each hash's answer (its video files, or none when uncached) is shared by every user
-// for 10 min, and requests in flight are shared too: episodes of one show check each season pack once.
+// TorBox's cache is global: each hash's answer (and in-flight check) is shared by all users for 10 min.
 const checks = new Map();
 async function cached(key, hashes) {
   if (checks.size > 50000) checks.clear();
@@ -247,8 +236,7 @@ async function cached(key, hashes) {
 
 async function find(key, type, imdb, s, e) {
   const [m, others] = await Promise.all([meta(type, imdb), tmdbTitles(type, imdb)]);
-  // Each spelling, with and without a leading "the"; the year and season checks below keep strays out. A title in a
-  // script norm drops ("തണ്ണീർ മത്തൻ ദിനങ്ങൾ") normalises to nothing and is skipped.
+  // Each spelling with and without a leading "the"; non-Latin titles normalise to nothing and are skipped.
   const titles = [...new Set([m.name, ...others].map(norm).filter(Boolean))];
   const seen = new Map();
   for (const title of titles)
@@ -263,8 +251,7 @@ async function find(key, type, imdb, s, e) {
   }
   // 500 candidates are checked: those naming the season first, then by size.
   cands = cands.sort((a, b) => a.fit - b.fit || b.b - a.b).slice(0, 500);
-  // One round: file lists come back only for cached hashes, so a separate "is it cached" pass would only add a
-  // round trip. A shared check may have run on another user's failing key; retry once on our own.
+  // A shared check may have run on another user's failing key; retry once on our own.
   const hs = cands.map(r => r.h);
   const c = await cached(key, hs).catch(() => cached(key, hs));
   const ep = s && epRe(s, e);
@@ -296,9 +283,7 @@ async function mylist(key, k, { match, fresh = true } = {}) {
   return match ? undefined : all;
 }
 
-// Consenting libraries are copied into MyTorbox's Redis `hashlib` in its entry shape: lowercase hash ->
-// {name, size, files, url}. `url` (web downloads only) matters because a webdl hash is md5(original_url), and TorBox
-// serves a cached webdl from that URL even after it expires. No key, auth_id or IP is stored.
+// Consenting libraries go to MyTorbox's Redis `hashlib`; webdl `url` is kept since TorBox serves a cached webdl by it.
 let redis;
 const polled = new Map();
 const COPY_EVERY = 6 * 3600;
@@ -326,12 +311,10 @@ function contribute(key) {
 }
 
 async function copy(key) {
-  // Map dedupes repeats within a library; comparing against Redis skips entries that are already identical.
   const fresh = new Map();
   for (const k of ['torrents', 'webdl'])
     for (const t of await mylist(key, k, { fresh: false }))
-      // Incomplete items have size -1 and no files and would overwrite a complete entry; one still downloading is not
-      // in TorBox's cache, so listing it would only cost every user a failed cache check.
+      // Unfinished items aren't cached and would overwrite a complete entry.
       if (t.hash && t.files?.length && t.download_finished !== false && (k === 'torrents' || t.original_url))
         fresh.set(String(t.hash).toLowerCase(), entry(k, t));
   const hs = [...fresh.keys()];
@@ -345,8 +328,7 @@ async function copy(key) {
   console.log(`contributed a library: ${hs.length} items, ${written} new or changed`);
 }
 
-// Install URL segment: base64url JSON {key, contribute, user?}. A bare key (pre-consent installs) never contributes.
-// `user` is a beta-portal account token; without one, requests count as anonymous.
+// base64url JSON {key, contribute, user?}; a bare key is a pre-consent install and never contributes.
 function config(seg) {
   try {
     const c = JSON.parse(Buffer.from(seg, 'base64url').toString());
@@ -355,9 +337,7 @@ function config(seg) {
   return /^[\w-]+$/.test(seg) ? { key: seg } : null;
 }
 
-// The beta portal (BETA_URL) gets one event per stream request and play. A revoked or unknown account gets no
-// streams and no plays; the portal being down takes nothing away. Stream lists see a revoke within 30 s, plays
-// check fresh so the lists Stremio already holds stop playing at once.
+// Beta portal down takes nothing away; plays check fresh so lists Stremio already holds stop at once.
 const actives = new Map();
 const checkActive = async user => {
   const r = await get(`${BETA_URL}/check/${user}`, {}, 3000);
@@ -365,8 +345,7 @@ const checkActive = async user => {
 };
 const active = (user, fresh) => !BETA_URL || !user ? Promise.resolve(true)
   : (fresh ? checkActive(user) : memo(actives, user, 30e3, () => checkActive(user))).catch(() => true);
-// Only nginx (the tunnel) names a tester or a viewer's address: the LAN and tailnet port reaches Hashbolt directly,
-// and a client there could otherwise claim any account or IP.
+// Only nginx may name a tester or viewer IP: a direct LAN/tailnet client could claim any.
 const lookups = new Map();
 const nginxAt = () => memo(lookups, 'nginx', 60e3, () => dns.lookup('nginx').then(r => r.address)).catch(() => null);
 const fromNginx = async req => {
@@ -433,8 +412,7 @@ function send(res, code, body, type = 'application/json') {
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
 }
 
-// Every URL handed out carries the proxy's X-Forwarded-Prefix, if any. Headers are validated since they are
-// written into the configure page.
+// Headers are validated since they are written into the configure page.
 function origin(req) {
   const proto = req.headers['x-forwarded-proto']?.split(',')[0].trim() === 'https' ? 'https' : 'http';
   const host = /^[\w.-]+(:\d+)?$/.test(req.headers.host || '') ? req.headers.host : 'localhost';
@@ -463,8 +441,7 @@ const server = http.createServer(async (req, res) => {
     const cfg = config(seg);
     if (!cfg) return send(res, 400, { error: 'bad config' });
     const { key } = cfg;
-    // On a tester's /hb/u/<token>/ link nginx names the account, checked by the portal before it got here; it wins
-    // over whatever the install config claims.
+    // nginx's portal-checked account wins over the install config's.
     const beta = req.viaNginx && req.headers['x-beta-user'];
     if (/^[\w-]{8,64}$/.test(beta || '')) cfg.user = beta;
     if (route === 'manifest.json') return send(res, 200, { ...withLogo, behaviorHints: { configurable: true } });

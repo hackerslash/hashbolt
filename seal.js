@@ -1,8 +1,4 @@
-// The index is published on the repo's public `index` release, and it holds what consenting users' libraries shared
-// (release names, web download URLs), so it is encrypted: AES-256-GCM under INDEX_KEY (32 random bytes, base64), a
-// secret only the workflow and the server have. A sealed file is a 12-byte IV, the gzipped index encrypted, and the
-// 16-byte tag, which fails the open of a file that was altered or sealed under another key.
-// `node seal.js data.tsv data.tsv.gz.enc` seals (the workflow); the server opens.
+// The public release holds users' libraries, so it is sealed: 12-byte IV | AES-256-GCM(gzip(index)) | 16-byte tag.
 const crypto = require('crypto');
 const fs = require('fs');
 const zlib = require('zlib');
@@ -23,8 +19,7 @@ async function seal(src, dst) {
   }, fs.createWriteStream(dst));
 }
 
-// Writes the plaintext to dst as it decrypts; the tag is checked at the end and rejects then, so the caller writes to
-// a temporary file and renames it only once this resolves.
+// The tag is only checked at the end: dst must be a temp file, renamed once this resolves.
 async function open(src, dst) {
   const { size } = fs.statSync(src);
   if (size < 28) throw new Error('sealed index too short');
