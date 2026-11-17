@@ -25,7 +25,7 @@ GitHub Actions, hourly (dispatched)             Hashbolt server, every 10 min
   Actions secret) and the server have. The server rejects a file that fails the GCM tag.
 - **Lookup:** IMDb id -> Cinemeta title -> binary search over the sorted index (kept as one buffer, ~500 MB RSS),
   with and without a leading "the"; movies must match the year, series drop releases naming another season
-  -> one round of TorBox cache checks with file lists (at most 5 parallel calls), cached per hash for 10 min and
+  -> one round of TorBox cache checks with file lists (at most 8 parallel calls), cached per hash for 10 min and
   shared across users and episodes. Up to 25 streams at 2160p and 15 at 1080p, spare slots to the next best,
   listed by resolution, then source, then size.
 - **Play:** `/play` reuses the item if it's already in the user's library, otherwise adds it only if cached, then
@@ -73,5 +73,5 @@ Without `INDEX_REPO` the server serves a local `data.tsv`, built with `npm run b
 | `/configure` | install page |
 | `/:config/manifest.json` | addon manifest |
 | `/:config/stream/:type/:id.json` | cached streams |
-| `/:config/play/:hash[/:season/:episode]` | resolve and redirect to the TorBox link |
+| `/:config/play/:hash/:file` | resolve and redirect to the TorBox link |
 | `/health` | index size; 503 until loaded |
