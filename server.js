@@ -313,7 +313,8 @@ function contribute(key) {
   if (!process.env.REDIS_URL || Date.now() - (polled.get(id) || 0) < COPY_EVERY * 1e3) return;
   if (polled.size >= 20000) polled.clear();
   polled.set(id, Date.now());
-  redis ||= new (require('ioredis'))(process.env.REDIS_URL, { maxRetriesPerRequest: 3 });
+  // failed commands reject and are logged below; without a listener ioredis prints every reconnect error
+  redis ||= new (require('ioredis'))(process.env.REDIS_URL, { maxRetriesPerRequest: 3 }).on('error', () => {});
   const claim = 'hashbolt:polled:' + id;
   (async () => {
     // Redis unreachable: nothing was claimed, so the next stream request tries again.
