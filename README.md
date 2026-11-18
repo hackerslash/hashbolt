@@ -28,6 +28,11 @@ GitHub Actions, hourly (dispatched)             Hashbolt server, every 10 min
   -> one round of TorBox cache checks with file lists (at most 8 parallel calls), cached per hash for 10 min and
   shared across users and episodes. Up to 25 streams at 2160p and 15 at 1080p, spare slots to the next best,
   listed by resolution, then source, then size.
+- **Same title, same year:** the lookup has only the name and the year, so two different films that share both
+  get the same candidates. Both Leo 2023 films (the Tamil one, tt15654328, and the Netflix animation, tt5755238)
+  return a byte-identical 87, and one of the two is always wrong. Telling them apart needs something the hashlist
+  does not carry — the release's language against the title's, or a judgement on the file name — so it is left as
+  it is on purpose (2026-11-18).
 - **Play:** `/play` reuses the item if it's already in the user's library, otherwise adds it only if cached, then
   redirects to the TorBox link (reused for 5 min).
 
