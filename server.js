@@ -310,22 +310,28 @@ function contribute(key) {
   })().catch(e => console.error('contribute failed:', e.message));
 }
 
-async function copy(key) {
+async function copy(key, list = mylist, store = redis) {
   const fresh = new Map();
-  for (const k of ['torrents', 'webdl'])
-    for (const t of await mylist(key, k, { fresh: false }))
-      // Unfinished items aren't cached and would overwrite a complete entry.
-      if (t.hash && t.files?.length && t.download_finished !== false && (k === 'torrents' || t.original_url))
-        fresh.set(String(t.hash).toLowerCase(), entry(k, t));
+  const errors = [];
+  for (const k of ['torrents', 'webdl']) {
+    try {
+      for (const t of await list(key, k, { fresh: false })) {
+        // Unfinished items aren't cached and would overwrite a complete entry.
+        if (t.hash && t.files?.length && t.download_finished !== false && (k === 'torrents' || t.original_url))
+          fresh.set(String(t.hash).toLowerCase(), entry(k, t));
+      }
+    } catch (e) { errors.push(e); }
+  }
   const hs = [...fresh.keys()];
   let written = 0;
   for (let i = 0; i < hs.length; i += 1000) {
-    const chunk = hs.slice(i, i + 1000), old = await redis.hmget('hashlib', ...chunk);
+    const chunk = hs.slice(i, i + 1000), old = await store.hmget('hashlib', ...chunk);
     const changed = chunk.flatMap((h, j) => old[j] === fresh.get(h) ? [] : [h, fresh.get(h)]);
-    if (changed.length) await redis.hset('hashlib', ...changed);
+    if (changed.length) await store.hset('hashlib', ...changed);
     written += changed.length / 2;
   }
   console.log(`contributed a library: ${hs.length} items, ${written} new or changed`);
+  if (errors.length) throw errors[0]; // release the claim so the failed source can retry
 }
 
 // base64url JSON {key, contribute, user?}; a bare key is a pre-consent install and never contributes.
@@ -482,4 +488,4 @@ if (require.main === module) {
     setInterval(refresh, 10 * 60e3);
   } else console.log('INDEX_REPO not set: serving local data.tsv only (run `npm run build` to rebuild it)');
 }
-module.exports = { fromNginx, norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate, facts, describe };
+module.exports = { copy, fromNginx, norm, seasonFit, movieFit, foreign, epRe, pick, config, limiter, load, prefix, webUrl: h => urls.get(h), find, source, byQuality, rate, facts, describe };

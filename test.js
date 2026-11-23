@@ -195,3 +195,24 @@ require('./server').fromNginx({ socket: { remoteAddress: '192.168.0.50' } })
   await assert.rejects(open(at('sealed'), at('x')), /32 bytes/);
   console.log('seal ok');
 })();
+
+(async () => {
+  const { copy } = require('./server');
+  for (const failed of ['torrents', 'webdl']) {
+    const written = new Map();
+    const hash = 'a'.repeat(40);
+    const list = async (_, kind) => {
+      if (kind === failed) throw new Error(`${kind} unavailable`);
+      return [{ hash, original_url: 'https://cdn.test/f', download_finished: true, files: [{ name: 'f.mkv' }] }];
+    };
+    const store = {
+      hmget: async (_, ...hashes) => hashes.map(h => written.get(h)),
+      hset: async (_, hash, value) => written.set(hash, value),
+    };
+    await assert.rejects(copy('key', list, store), new RegExp(failed));
+    assert.equal(written.size, 1);
+    assert.deepEqual(JSON.parse(written.get(hash)), {
+      files: ['f.mkv'], ...(failed === 'torrents' && { url: 'https://cdn.test/f' }),
+    });
+  }
+})();
